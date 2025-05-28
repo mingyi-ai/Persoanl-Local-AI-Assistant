@@ -3,6 +3,8 @@ import streamlit as st
 from pathlib import Path
 import time
 import subprocess # For Ollama CLI interaction
+import json # For parsing Ollama streaming responses
+import requests # For direct Ollama API access
 
 # Attempt to import OllamaLLM, fall back to Ollama if not found
 try:
@@ -16,15 +18,23 @@ except ImportError:
         OllamaLLM = None # Placeholder if no Ollama integration is found
         st.error("Ollama LLM integration not found. Please install `langchain-ollama` or `langchain-community`.")
 
-from core.db import add_resume, get_all_resumes, add_job_application
+from core.db import add_file, get_files_by_type, add_job_posting, add_application, log_application_status # Updated imports
 from core.file_utils import save_uploaded_file, COVER_LETTERS_DIR, save_cover_letter, get_file_hash
 from core.ai_tools import extract_text_from_pdf, score_resume_job_description, generate_cover_letter # Ensure this path is correct relative to how Streamlit runs pages
 
 st.set_page_config(layout="wide", page_title="AI Assistant")
 st.title("AI Assistant")
-st.caption("Leverage AI to score resumes, generate cover letters, and streamline your application process.")
+st.caption("Leverage AI to score resumes, generate cover letters, chat about your job search, and streamline your application process.")
 
 # --- Session State Initialization (specific to AI Assistant) ---
+# Chat related - using simple dict structure for messages
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []  # List of dicts with 'role' and 'content'
+# Ensure old chat history doesn't cause issues
+if "chat_history" in st.session_state:
+    # Clean up old format if it exists to avoid conflicts
+    del st.session_state.chat_history
+
 # Resume related
 if 'ai_resume_text' not in st.session_state:
     st.session_state.ai_resume_text = ""
@@ -57,6 +67,9 @@ if 'ai_llm_instance' not in st.session_state:
     st.session_state.ai_llm_instance = None
 if 'ai_ollama_not_found' not in st.session_state:
     st.session_state.ai_ollama_not_found = False
+# Remove conversation chain to avoid LangChain deprecation warning
+if 'conversation_chain' in st.session_state:
+    del st.session_state.conversation_chain
 
 
 # --- Helper function to get Ollama models (copied from app.py, consider moving to a utils file) ---
@@ -65,14 +78,18 @@ def get_ollama_models_ai_page():
     try:
         ollama_cmd_to_run = "ollama"
         result = subprocess.run([ollama_cmd_to_run, "list"], capture_output=True, text=True, check=True)
-        lines = result.stdout.strip().split('\n')
+        # Use splitlines() instead of split('\n') for better compatibility
+        lines = result.stdout.strip().splitlines()
+        print(f"DEBUG: Raw Ollama output: {result.stdout}")
         models = []
         if len(lines) > 1:
             for line_content in lines[1:]:
                 processed_line = line_content.strip()
                 if not processed_line: continue
                 parts = processed_line.split()
-                if parts: models.append(parts[0])
+                if parts: 
+                    models.append(parts[0])
+                    print(f"DEBUG: Found model: {parts[0]}")
         return models
     except FileNotFoundError:
         st.session_state.ai_ollama_not_found = True 
@@ -83,6 +100,120 @@ def get_ollama_models_ai_page():
     except Exception as e:
         st.error(f"An unexpected error occurred while fetching Ollama models: {e}")
         return []
+
+# Define the Ollama base URL
+OLLAMA_BASE_URL = "http://localhost:11434"
+
+# Function to stream responses directly from Ollama API
+def stream_ollama_response(prompt, model_name):
+    """Stream a response from Ollama API with proper error handling"""
+    # Prepare API endpoint and payload
+    api_url = f"{OLLAMA_BASE_URL}/api/generate"
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": True
+    }
+    
+    try:
+        # Use requests's streaming for efficient delivery
+        with requests.post(api_url, json=payload, stream=True) as response:
+            response.raise_for_status()  # Raise error for bad responses
+            full_response = ""
+            
+            # Process each chunk as it arrives
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        # Parse JSON from the line
+                        chunk = json.loads(line.decode('utf-8'))
+                        if 'response' in chunk:
+                            token = chunk['response']
+                            full_response += token
+                            yield token, full_response
+                        # Check for completion or error
+                        if chunk.get('done', False):
+                            break
+                    except json.JSONDecodeError:
+                        # Handle invalid JSON
+                        continue
+            
+            return full_response
+    except requests.RequestException as e:
+        # Handle request errors
+        error_msg = f"API error: {str(e)}"
+        yield error_msg, error_msg
+        return error_msg
+
+# --- AI Chat Section ---
+st.subheader("Chat with AI Job Assistant")
+
+# Add welcome message if chat is empty
+if not st.session_state.chat_messages:
+    model_name = st.session_state.ai_selected_model_name or "AI assistant"
+    welcome_msg = f"Hello! I'm your AI Job Assistant, powered by {model_name}. How can I help you today?"
+    st.session_state.chat_messages.append({"role": "assistant", "content": welcome_msg})
+
+# Display chat messages
+for message in st.session_state.chat_messages:
+    with st.chat_message(message["role"], avatar="🤖" if message["role"] == "assistant" else "👤"):
+        st.write(message["content"])
+
+# Handle user input
+if st.session_state.ai_llm_instance is None:
+    st.info("Please select a model from the sidebar to enable the chat.")
+else:
+    # Get user input
+    user_query = st.chat_input("Ask about job search, resume tips, or interview advice...")
+    
+    if user_query:
+        # Add user message to chat history
+        st.session_state.chat_messages.append({"role": "user", "content": user_query})
+        
+        # Display user message (already displayed by chat_input, but this ensures UI consistency)
+        with st.chat_message("user", avatar="👤"):
+            st.write(user_query)
+        
+        # Generate and display assistant response with streaming
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            
+            # Build context from chat history
+            context = "You are a helpful AI assistant specializing in job search advice, resume building, and interview preparation.\n\n"
+            # Add last few messages for context
+            for msg in st.session_state.chat_messages[-6:]:  # Last 6 messages (3 exchanges)
+                if msg["role"] == "user":
+                    context += f"Human: {msg['content']}\n"
+                else:
+                    context += f"Assistant: {msg['content']}\n"
+            
+            # Stream response
+            full_response = ""
+            try:
+                for token, current_response in stream_ollama_response(context, st.session_state.ai_selected_model_name):
+                    message_placeholder.markdown(current_response + "▌")
+                    full_response = current_response
+                
+                # Final display without cursor
+                if full_response:
+                    message_placeholder.markdown(full_response)
+                    # Add to chat history
+                    st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
+                else:
+                    message_placeholder.error("Failed to generate a response. Please try again.")
+            except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                message_placeholder.error(error_msg)
+                st.session_state.chat_messages.append({"role": "assistant", "content": f"I'm sorry, I encountered an error: {str(e)}"})
+            
+            # Force page refresh to update the chat UI
+            st.rerun()
+
+# Add a more prominent divider between chat and resume tools
+st.divider()
+st.subheader("Resume & Cover Letter Tools")
+st.caption("Upload your resume, paste a job description, and use AI to score your resume and generate a cover letter.")
+st.divider()
 
 # --- Sidebar for Resume Upload/Selection and Model Selection ---
 with st.sidebar:
@@ -105,10 +236,16 @@ with st.sidebar:
             else:
                 file_hash_ai = get_file_hash(saved_path_ai)
                 if file_hash_ai:
-                    resume_id_ai = add_resume(saved_path_ai, file_hash_ai) # Add to DB
-                    if resume_id_ai:
-                        st.session_state.ai_resume_id = resume_id_ai
-                        st.info(f"New resume added to database with ID: {resume_id_ai}. This resume is now selected.")
+                    # Use add_file for resumes
+                    resume_file_id_ai = add_file(
+                        original_name=uploaded_resume_ai.name,
+                        stored_path=str(saved_path_ai), # Ensure it's a string
+                        sha256=file_hash_ai,
+                        file_type='resume'
+                    )
+                    if resume_file_id_ai:
+                        st.session_state.ai_resume_id = resume_file_id_ai # Store file_id as resume_id
+                        st.info(f"New resume added to files with ID: {resume_file_id_ai}. This resume is now selected.")
                     else:
                         st.error("Failed to add new resume to database.")
                 else:
@@ -118,10 +255,11 @@ with st.sidebar:
             st.session_state.ai_resume_file_path = None
 
     st.subheader("Or Select Existing Resume")
-    available_resumes_ai = get_all_resumes()
+    available_resumes_ai = get_files_by_type('resume') # Use get_files_by_type
     resume_options_ai = {0: "None (or use uploaded if available)"}
     for res_ai in available_resumes_ai:
-        resume_options_ai[res_ai['id']] = Path(res_ai['file_path']).name
+        # Adjust to new structure: {'id': ..., 'original_name': ..., 'stored_path': ...}
+        resume_options_ai[res_ai['id']] = Path(res_ai['stored_path']).name
     
     # Determine default selection for existing resumes
     # If a new one was just uploaded and processed, it takes precedence.
@@ -143,7 +281,7 @@ with st.sidebar:
         st.session_state.ai_resume_id_from_select = selected_existing_resume_id # Track selection from this box
         selected_resume_details = next((r for r in available_resumes_ai if r['id'] == selected_existing_resume_id), None)
         if selected_resume_details:
-            st.session_state.ai_resume_file_path = selected_resume_details['file_path']
+            st.session_state.ai_resume_file_path = selected_resume_details['stored_path'] # Use stored_path
             st.session_state.ai_resume_text = extract_text_from_pdf(st.session_state.ai_resume_file_path)
             st.session_state.ai_resume_id = selected_existing_resume_id # Update the main resume ID for AI tasks
             if not st.session_state.ai_resume_text:
@@ -188,6 +326,14 @@ with st.sidebar:
                     try:
                         st.session_state.ai_llm_instance = OllamaLLM(model=chosen_model_name_ai, timeout=120)
                         st.session_state.ai_selected_model_name = chosen_model_name_ai
+                        
+                        # Add a welcome message when model changes
+                        if st.session_state.chat_messages:
+                            st.session_state.chat_messages.append({
+                                "role": "assistant", 
+                                "content": f"I've switched to the {chosen_model_name_ai} model. How can I help you with your job search?"
+                            })
+                        
                         st.success(f"AI model {chosen_model_name_ai} initialized.")
                     except Exception as e:
                         st.error(f"Failed to initialize model {chosen_model_name_ai}: {e}")
@@ -197,6 +343,9 @@ with st.sidebar:
             st.warning("No Ollama models found or Ollama is not running. AI features will be disabled.")
             st.session_state.ai_llm_instance = None
             st.session_state.ai_selected_model_name = None
+
+# Add a divider between chat and resume tools
+st.divider()
 
 # --- Main Area for Job Description, AI Actions, and Output ---
 col1_ai, col2_ai = st.columns(2)
@@ -275,44 +424,78 @@ if generate_cl_button_ai:
                 st.session_state.ai_cover_letter_result = cover_letter_text # Store even if error for inspection
 
 if save_app_button_ai:
-    if not ai_job_title_input: # Should be disabled, but double check
-        st.error("Job Title is required to save the application.")
+    if not ai_job_title_input or not ai_company_name_input: # Require title and company for job posting
+        st.error("Job Title and Company Name are required to save the application.")
     else:
-        # Save cover letter to file if generated
-        cover_letter_file_path_ai = None
-        if st.session_state.ai_cover_letter_result:
-            filename_prefix_ai = f"{ai_job_title_input}_{ai_company_name_input}".replace(" ", "_").replace("/", "_")
-            cover_letter_file_path_ai = save_cover_letter(st.session_state.ai_cover_letter_result, filename_prefix_ai)
-            if cover_letter_file_path_ai:
-                st.info(f"Generated cover letter saved to: {cover_letter_file_path_ai}")
-            else:
-                st.warning("Could not save the generated cover letter to a file, will save text to DB if possible.")
-
-        app_id_ai = add_job_application(
-            job_title=ai_job_title_input,
-            company=ai_company_name_input if ai_company_name_input else None,
-            resume_id=st.session_state.ai_resume_id, # From sidebar selection/upload
-            job_description=st.session_state.ai_job_description_input if st.session_state.ai_job_description_input else None,
-            cover_letter_text=st.session_state.ai_cover_letter_result if not cover_letter_file_path_ai else None, # Store text if not saved to file
-            cover_letter_path=cover_letter_file_path_ai,
-            ai_score=st.session_state.ai_score_result,
-            ai_reasoning=st.session_state.ai_reasoning_result if st.session_state.ai_reasoning_result else None,
-            # outcome and notes can be set to defaults or handled in Job Tracker
+        # 1. Add Job Posting
+        job_posting_id = add_job_posting(
+            title=ai_job_title_input,
+            company=ai_company_name_input,
+            description=st.session_state.ai_job_description_input
+            # Add other fields like location, source_url, date_posted if available from UI
         )
-        if app_id_ai:
-            st.success(f"Application for \'{ai_job_title_input}\' saved with ID: {app_id_ai}. View/edit in Job Tracker.")
-            # Clear/reset relevant AI page session state for next use
-            st.session_state.ai_job_description_input = ""
-            st.session_state.ai_score_result = None
-            st.session_state.ai_reasoning_result = ""
-            st.session_state.ai_cover_letter_result = ""
-            st.session_state.ai_raw_score_response = ""
-            st.session_state.ai_raw_cl_response = ""
-            # Consider clearing job title and company, or let them persist for quick re-use.
-            # For now, they will clear on next rerun due to st.text_input behavior without explicit session state backing for them.
-            st.rerun() 
+
+        if not job_posting_id:
+            st.error("Failed to create or retrieve job posting entry.")
         else:
-            st.error("Failed to save application to database via AI Assistant page.")
+            # 2. Save cover letter to file if generated
+            cover_letter_file_id_ai = None
+            if st.session_state.ai_cover_letter_result:
+                filename_prefix_ai = f"{ai_job_title_input}_{ai_company_name_input}".replace(" ", "_").replace("/", "_")
+                # Assuming save_cover_letter now returns a path, and we need to add it to files table
+                cl_path_str = save_cover_letter(st.session_state.ai_cover_letter_result, filename_prefix_ai)
+                if cl_path_str:
+                    cl_path = Path(cl_path_str)
+                    cl_hash = get_file_hash(cl_path)
+                    if cl_hash:
+                        cover_letter_file_id_ai = add_file(
+                            original_name=cl_path.name,
+                            stored_path=str(cl_path),
+                            sha256=cl_hash,
+                            file_type='cover_letter'
+                        )
+                        if cover_letter_file_id_ai:
+                            st.info(f"Generated cover letter saved to: {cl_path_str} (File ID: {cover_letter_file_id_ai})")
+                        else:
+                            st.warning("Cover letter saved to disk, but failed to add to files database.")
+                    else:
+                        st.warning("Could not hash the generated cover letter file.")
+                else:
+                    st.warning("Could not save the generated cover letter to a file.")
+
+            # 3. Add Application
+            # Ensure ai_resume_id is the file_id from the 'files' table
+            current_resume_file_id = st.session_state.get('ai_resume_id')
+
+            app_id_ai = add_application(
+                job_posting_id=job_posting_id,
+                resume_file_id=current_resume_file_id, 
+                cover_letter_file_id=cover_letter_file_id_ai,
+                submission_method=None, # Or add a UI element for this
+                notes="Application created via AI Assistant." 
+                # date_submitted is handled by add_application
+            )
+            if app_id_ai:
+                st.success(f"Application for '{ai_job_title_input}' saved with ID: {app_id_ai}. View/edit in Job Tracker.")
+                # Log initial status
+                log_application_status(app_id_ai, "Draft", "Application created via AI Assistant")
+
+                # Optionally, save AI score and reasoning to parsed_metadata or a similar table
+                # This requires a function like add_or_update_parsed_metadata from core.db
+                # For now, this step is omitted as it's not a direct part of add_application
+
+                # Clear/reset relevant AI page session state for next use
+                st.session_state.ai_job_description_input = ""
+                st.session_state.ai_score_result = None
+                st.session_state.ai_reasoning_result = ""
+                st.session_state.ai_cover_letter_result = ""
+                st.session_state.ai_raw_score_response = ""
+                st.session_state.ai_raw_cl_response = ""
+                # Consider clearing job title and company, or let them persist.
+                # For now, they will clear on next rerun due to st.text_input behavior.
+                st.rerun() 
+            else:
+                st.error("Failed to save application to database via AI Assistant page.")
 
 
 with col2_ai:

@@ -1,6 +1,7 @@
 streamlit
 langchain
 langchain-community
+langchain-ollama
 ollama
 pypdf2
 pandas
