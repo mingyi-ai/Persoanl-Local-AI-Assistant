@@ -390,17 +390,22 @@ with st.sidebar:
         available_models_ai = get_ollama_models_ai_page()
         if available_models_ai:
             default_model_ai = st.session_state.ai_selected_model_name
-            if default_model_ai not in available_models_ai:
+            if not default_model_ai or default_model_ai not in available_models_ai:
+                # If no model selected, or selected model is not in the current list, default to the first one
                 default_model_ai = available_models_ai[0]
+
+            # default_model_ai is now guaranteed to be a model name that exists in available_models_ai.
+            # So, we can directly find its index.
+            select_box_idx = available_models_ai.index(default_model_ai)
 
             chosen_model_name_ai = st.selectbox(
                 "Choose an AI model:",
                 options=available_models_ai,
-                index=available_models_ai.index(default_model_ai) if default_model_ai in available_models_ai else 0,
+                index=select_box_idx, # Use the determined index
                 key="ai_ollama_model_selector"
             )
 
-            if st.session_state.ai_llm_instance is None or st.session_state.ai_llm_instance.model != chosen_model_name_ai:
+            if st.session_state.ai_llm_instance is None or st.session_state.ai_selected_model_name != chosen_model_name_ai:
                 with st.spinner(f"Initializing AI model: {chosen_model_name_ai}..."):
                     try:
                         st.session_state.ai_llm_instance = OllamaLLM(model=chosen_model_name_ai, timeout=120)
@@ -414,6 +419,7 @@ with st.sidebar:
                             })
                         
                         st.success(f"AI model {chosen_model_name_ai} initialized.")
+                        st.rerun() # Force a rerun to ensure UI consistency after model selection and initialization
                     except Exception as e:
                         st.error(f"Failed to initialize model {chosen_model_name_ai}: {e}")
                         st.session_state.ai_llm_instance = None
