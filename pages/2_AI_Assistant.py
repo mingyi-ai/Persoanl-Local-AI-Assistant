@@ -18,9 +18,9 @@ except ImportError:
         OllamaLLM = None # Placeholder if no Ollama integration is found
         st.error("Ollama LLM integration not found. Please install `langchain-ollama` or `langchain-community`.")
 
-from core.db import add_file, get_files_by_type, add_job_posting, add_application, log_application_status # Updated imports
 from core.file_utils import save_uploaded_file, COVER_LETTERS_DIR, save_cover_letter, get_file_hash
-from core.ai_tools import extract_text_from_pdf, score_resume_job_description, generate_cover_letter # Ensure this path is correct relative to how Streamlit runs pages
+from core.ai_tools import extract_text_from_pdf, score_resume_job_description, generate_cover_letter, analyze_job_description_with_ollama 
+from core.db import add_file, get_files_by_type, add_job_posting, add_application, log_application_status, add_or_update_parsed_metadata # Added add_or_update_parsed_metadata
 
 st.set_page_config(layout="wide", page_title="AI Assistant")
 st.title("AI Assistant")
@@ -43,21 +43,33 @@ if 'ai_resume_file_path' not in st.session_state:
 if 'ai_resume_id' not in st.session_state: # ID of the resume selected/uploaded in this page
     st.session_state.ai_resume_id = None
 
-# AI processing results
-if 'ai_score_result' not in st.session_state:
-    st.session_state.ai_score_result = None
-if 'ai_reasoning_result' not in st.session_state:
-    st.session_state.ai_reasoning_result = ""
-if 'ai_cover_letter_result' not in st.session_state:
-    st.session_state.ai_cover_letter_result = ""
+# Job description input for saving application
 if 'ai_job_description_input' not in st.session_state: # Stores JD for current AI operations
     st.session_state.ai_job_description_input = ""
 
-# Raw AI responses for debugging/transparency
-if 'ai_raw_score_response' not in st.session_state:
-    st.session_state.ai_raw_score_response = ""
-if 'ai_raw_cl_response' not in st.session_state:
-    st.session_state.ai_raw_cl_response = ""
+# Initialize values for job title and company text inputs
+if 'ai_job_title_save' not in st.session_state:
+    st.session_state.ai_job_title_save = ""
+if 'ai_company_name_save' not in st.session_state:
+    st.session_state.ai_company_name_save = ""
+
+# New session state for job description analysis results
+if 'show_analysis_results' not in st.session_state:
+    st.session_state.show_analysis_results = False
+if 'ai_generated_tags' not in st.session_state:
+    st.session_state.ai_generated_tags = []
+if 'ai_generated_tech_stacks' not in st.session_state:
+    st.session_state.ai_generated_tech_stacks = []
+if 'selected_tags' not in st.session_state: # For multiselect interaction
+    st.session_state.selected_tags = []
+if 'selected_tech_stacks' not in st.session_state: # For multiselect interaction
+    st.session_state.selected_tech_stacks = []
+# Confirmed tags/stacks are what get saved
+if 'confirmed_tags' not in st.session_state:
+    st.session_state.confirmed_tags = []
+if 'confirmed_tech_stacks' not in st.session_state:
+    st.session_state.confirmed_tech_stacks = []
+
 
 # Model selection and LLM instance (can be shared or page-specific)
 # For now, keeping it page-specific to avoid conflicts if app.py also had one.
@@ -415,80 +427,133 @@ with st.sidebar:
 st.divider()
 
 # --- Main Area for Job Description, AI Actions, and Output ---
-col1_ai, col2_ai = st.columns(2)
+# Remove the old AI action buttons and related UI elements
 
-with col1_ai:
-    st.subheader("Job Details for AI Processing")
-    ai_job_title_input = st.text_input("Job Title:", key="ai_job_title")
-    ai_company_name_input = st.text_input("Company Name:", key="ai_company_name")
-    # Use session state for job description to persist it across reruns if actions are taken
-    st.session_state.ai_job_description_input = st.text_area(
-        "Paste the full job description here:", 
-        value=st.session_state.ai_job_description_input, 
-        height=250, 
-        key="ai_job_desc_input"
-    )
+# Placeholder for new AI tools/features that will be driven by chat prompts
+st.info("Use the chat interface above to interact with the AI for tasks like resume analysis, cover letter generation, and more.")
 
-    st.markdown("##### AI Actions")
-    ai_features_disabled = st.session_state.ai_llm_instance is None or not st.session_state.ai_resume_text
+# Section for saving application details that might be populated via chat interaction
+st.subheader("Save Application Details")
+st.caption("If the AI helped you draft application details, you can save them here. You can also analyze the job description for tags and tech stacks.") # Updated caption
 
-    score_button_ai = st.button("1. Score Resume", disabled=ai_features_disabled, key="ai_score_btn")
-    generate_cl_button_ai = st.button("2. Generate Cover Letter", disabled=ai_features_disabled, key="ai_generate_cl_btn")
-    
-    st.markdown("##### Save Application")
-    # Enable save if job title is present, other fields are optional for saving from AI context
-    save_app_button_ai = st.button("3. Save Application to Tracker", key="ai_save_app_btn", disabled=not ai_job_title_input)
+ai_job_title_input = st.text_input("Job Title (can be extracted by AI):", value=st.session_state.ai_job_title_save, key="ai_job_title_save_widget")
+ai_company_name_input = st.text_input("Company Name (can be extracted by AI):", value=st.session_state.ai_company_name_save, key="ai_company_name_save_widget")
+# Job description is already in session state if needed for saving
+st.session_state.ai_job_description_input = st.text_area(
+    "Job Description (can be extracted or summarized by AI):", 
+    value=st.session_state.ai_job_description_input, 
+    height=150, 
+    key="ai_job_desc_save"
+)
 
-# --- Processing Logic for AI Buttons ---
-if score_button_ai:
-    st.session_state.ai_raw_score_response = "" 
-    if not st.session_state.ai_resume_text:
-        st.error("Please upload or select a resume first (in the sidebar).")
-    elif not st.session_state.ai_job_description_input: # Check the session state version
-        st.error("Please paste the job description.")
-    # LLM instance check is part of ai_features_disabled
-    else:
-        with st.spinner(f"AI ({st.session_state.ai_selected_model_name}) is scoring your resume..."):
-            score, reasoning, raw_response = score_resume_job_description(
-                st.session_state.ai_llm_instance, 
-                st.session_state.ai_resume_text, 
-                st.session_state.ai_job_description_input # Use session state version
+# --- Job Description Analysis Section ---
+col1_jd_analysis, col2_jd_analysis = st.columns(2)
+with col1_jd_analysis:
+    analyze_jd_button = st.button("Analyze Job Description for Tags/Tech", key="analyze_jd_btn")
+
+if analyze_jd_button and st.session_state.ai_job_description_input:
+    if st.session_state.ai_llm_instance and st.session_state.ai_selected_model_name:
+        with st.spinner("Analyzing job description... This may take a moment."):
+            analysis_results = analyze_job_description_with_ollama(
+                st.session_state.ai_job_description_input,
+                st.session_state.ai_selected_model_name
             )
-            st.session_state.ai_raw_score_response = raw_response or "No raw response captured."
-            if score is not None and reasoning is not None:
-                st.session_state.ai_score_result = score
-                st.session_state.ai_reasoning_result = reasoning
-                st.success("Resume scored successfully!")
-            else:
-                st.error("Failed to score resume. Check console/Ollama logs for errors.")
-                st.session_state.ai_score_result = None
-                st.session_state.ai_reasoning_result = "Error during scoring."
-
-if generate_cl_button_ai:
-    st.session_state.ai_raw_cl_response = ""
-    if not st.session_state.ai_resume_text:
-        st.error("Please upload or select a resume first (in the sidebar).")
-    elif not st.session_state.ai_job_description_input:
-        st.error("Please paste the job description.")
-    elif not ai_company_name_input or not ai_job_title_input: # Check direct inputs for these
-        st.error("Please enter Company Name and Job Title for the cover letter.")
-    # LLM instance check is part of ai_features_disabled
+        if analysis_results and (analysis_results.get("tags") or analysis_results.get("tech_stacks")):
+            st.session_state.ai_generated_tags = analysis_results.get("tags", [])
+            st.session_state.ai_generated_tech_stacks = analysis_results.get("tech_stacks", [])
+            # Initialize selected with all generated, user can deselect
+            st.session_state.selected_tags = st.session_state.ai_generated_tags[:]
+            st.session_state.selected_tech_stacks = st.session_state.ai_generated_tech_stacks[:]
+            st.session_state.show_analysis_results = True
+            st.success("Job description analyzed. Review and confirm below.")
+            st.rerun() # Rerun to show the modal-like section
+        else:
+            st.error("Failed to analyze job description or no tags/tech stacks found.")
+            st.session_state.show_analysis_results = False
     else:
-        with st.spinner(f"AI ({st.session_state.ai_selected_model_name}) is crafting your cover letter..."):
-            cover_letter_text, raw_response = generate_cover_letter(
-                st.session_state.ai_llm_instance,
-                st.session_state.ai_resume_text,
-                st.session_state.ai_job_description_input, # Use session state version
-                ai_company_name_input, # Use direct input
-                ai_job_title_input     # Use direct input
-            )
-            st.session_state.ai_raw_cl_response = raw_response or "No raw response captured."
-            if cover_letter_text and "Error during AI" not in cover_letter_text:
-                st.session_state.ai_cover_letter_result = cover_letter_text
-                st.success("Cover letter generated!")
+        st.warning("Please select an AI model from the sidebar to analyze the job description.")
+elif analyze_jd_button:
+    st.warning("Please enter a job description above to analyze.")
+
+if st.session_state.show_analysis_results:
+    with st.expander("Confirm Extracted Tags and Tech Stacks", expanded=True):
+        st.markdown("#### Review and Modify AI Suggestions")
+
+        # Tags selection
+        st.markdown("**Suggested Tags:**")
+        # Use a temporary variable for multiselect to manage its state correctly during interaction
+        current_selected_tags = st.multiselect(
+            "Select relevant tags:",
+            options=list(set(st.session_state.ai_generated_tags + st.session_state.selected_tags)), # Show all, including manually added
+            default=st.session_state.selected_tags,
+            key="multiselect_tags"
+        )
+        st.session_state.selected_tags = current_selected_tags
+        
+        custom_tag_input = st.text_input("Add custom tag:", key="custom_tag_input")
+        if st.button("Add Tag", key="add_custom_tag_btn"):
+            if custom_tag_input and custom_tag_input not in st.session_state.selected_tags:
+                st.session_state.selected_tags.append(custom_tag_input)
+                # No need to clear custom_tag_input here, text_input handles its own state unless we force rerun
+                st.rerun() # Rerun to update multiselect and clear input if desired (or manage input clear manually)
+            elif custom_tag_input in st.session_state.selected_tags:
+                st.toast(f"Tag '{custom_tag_input}' already selected.")
             else:
-                st.error("Failed to generate cover letter. Check console/Ollama logs for errors.")
-                st.session_state.ai_cover_letter_result = cover_letter_text # Store even if error for inspection
+                st.toast("Tag cannot be empty.")
+
+        st.divider()
+
+        # Tech Stacks selection
+        st.markdown("**Suggested Tech Stacks:**")
+        current_selected_tech_stacks = st.multiselect(
+            "Select relevant tech stacks:",
+            options=list(set(st.session_state.ai_generated_tech_stacks + st.session_state.selected_tech_stacks)),
+            default=st.session_state.selected_tech_stacks,
+            key="multiselect_tech_stacks"
+        )
+        st.session_state.selected_tech_stacks = current_selected_tech_stacks
+
+        custom_tech_stack_input = st.text_input("Add custom tech stack:", key="custom_tech_stack_input")
+        if st.button("Add Tech Stack", key="add_custom_tech_stack_btn"):
+            if custom_tech_stack_input and custom_tech_stack_input not in st.session_state.selected_tech_stacks:
+                st.session_state.selected_tech_stacks.append(custom_tech_stack_input)
+                st.rerun()
+            elif custom_tech_stack_input in st.session_state.selected_tech_stacks:
+                st.toast(f"Tech stack '{custom_tech_stack_input}' already selected.")
+            else:
+                st.toast("Tech stack cannot be empty.")
+        
+        st.divider()
+
+        # Confirmation and Cancel buttons
+        col_confirm, col_cancel = st.columns(2)
+        with col_confirm:
+            if st.button("Confirm Selections", key="confirm_analysis_btn"):
+                st.session_state.confirmed_tags = st.session_state.selected_tags[:]
+                st.session_state.confirmed_tech_stacks = st.session_state.selected_tech_stacks[:]
+                st.session_state.show_analysis_results = False
+                st.success("Tags and tech stacks confirmed. They will be saved with the application.")
+                st.rerun()
+        with col_cancel:
+            if st.button("Cancel Analysis", key="cancel_analysis_btn"):
+                # Reset selections to what was last confirmed or to generated if nothing confirmed yet
+                # Or simply hide and keep current selections for next time.
+                # For now, just hide.
+                st.session_state.show_analysis_results = False
+                st.info("Analysis confirmation cancelled.")
+                st.rerun()
+
+# Display confirmed tags/stacks if any, before save button
+if st.session_state.get('confirmed_tags') or st.session_state.get('confirmed_tech_stacks'):
+    st.markdown("---")
+    if st.session_state.get('confirmed_tags'):
+        st.markdown(f"**Confirmed Tags:** {", ".join(st.session_state.confirmed_tags)}")
+    if st.session_state.get('confirmed_tech_stacks'):
+        st.markdown(f"**Confirmed Tech Stacks:** {", ".join(st.session_state.confirmed_tech_stacks)}")
+    st.markdown("---")
+
+# Enable save if job title is present
+save_app_button_ai = st.button("Save Application to Tracker", key="ai_save_app_btn_new", disabled=not ai_job_title_input)
 
 if save_app_button_ai:
     if not ai_job_title_input or not ai_company_name_input: # Require title and company for job posting
@@ -499,93 +564,57 @@ if save_app_button_ai:
             title=ai_job_title_input,
             company=ai_company_name_input,
             description=st.session_state.ai_job_description_input
-            # Add other fields like location, source_url, date_posted if available from UI
         )
 
         if not job_posting_id:
             st.error("Failed to create or retrieve job posting entry.")
         else:
-            # 2. Save cover letter to file if generated
-            cover_letter_file_id_ai = None
-            if st.session_state.ai_cover_letter_result:
-                filename_prefix_ai = f"{ai_job_title_input}_{ai_company_name_input}".replace(" ", "_").replace("/", "_")
-                # Assuming save_cover_letter now returns a path, and we need to add it to files table
-                cl_path_str = save_cover_letter(st.session_state.ai_cover_letter_result, filename_prefix_ai)
-                if cl_path_str:
-                    cl_path = Path(cl_path_str)
-                    cl_hash = get_file_hash(cl_path)
-                    if cl_hash:
-                        cover_letter_file_id_ai = add_file(
-                            original_name=cl_path.name,
-                            stored_path=str(cl_path),
-                            sha256=cl_hash,
-                            file_type='cover_letter'
-                        )
-                        if cover_letter_file_id_ai:
-                            st.info(f"Generated cover letter saved to: {cl_path_str} (File ID: {cover_letter_file_id_ai})")
-                        else:
-                            st.warning("Cover letter saved to disk, but failed to add to files database.")
-                    else:
-                        st.warning("Could not hash the generated cover letter file.")
-                else:
-                    st.warning("Could not save the generated cover letter to a file.")
-
-            # 3. Add Application
-            # Ensure ai_resume_id is the file_id from the 'files' table
-            current_resume_file_id = st.session_state.get('ai_resume_id')
+            # Cover letter and resume are now handled differently (e.g., via chat commands or specific tools)
+            # For saving an application, we might need a way to select/link files if they were generated or uploaded.
+            # This part needs to be re-thought based on new AI tool workflows.
+            # For now, we'll assume resume_file_id might still be relevant if a resume was selected in the sidebar.
+            cover_letter_file_id_ai = None # Placeholder - will be set if a CL is generated and saved by a new tool
+            current_resume_file_id = st.session_state.get('ai_resume_id') # From sidebar selection
 
             app_id_ai = add_application(
                 job_posting_id=job_posting_id,
                 resume_file_id=current_resume_file_id, 
-                cover_letter_file_id=cover_letter_file_id_ai,
-                submission_method=None, # Or add a UI element for this
-                notes="Application created via AI Assistant." 
-                # date_submitted is handled by add_application
+                cover_letter_file_id=cover_letter_file_id_ai, # This will likely be None for now
+                submission_method=None, 
+                notes="Application details potentially drafted with AI Assistant. Specific files (e.g., cover letter) may need to be linked manually or via new AI tools."
             )
             if app_id_ai:
-                st.success(f"Application for '{ai_job_title_input}' saved with ID: {app_id_ai}. View/edit in Job Tracker.")
-                # Log initial status
+                st.success(f"Application for '{st.session_state.ai_job_title_save}' saved with ID: {app_id_ai}. View/edit in Job Tracker.") # Use session state value for display
                 log_application_status(app_id_ai, "Draft", "Application created via AI Assistant")
+                
+                # Save confirmed tags and tech stacks to parsed_metadata
+                if st.session_state.get('confirmed_tags') or st.session_state.get('confirmed_tech_stacks'):
+                    tags_json = json.dumps(st.session_state.get('confirmed_tags', []))
+                    tech_stacks_json = json.dumps(st.session_state.get('confirmed_tech_stacks', []))
+                    
+                    metadata_id = add_or_update_parsed_metadata(
+                        job_posting_id=job_posting_id,
+                        tags=tags_json,
+                        tech_stacks=tech_stacks_json
+                        # Seniority and industry can be added later if extracted
+                    )
+                    if metadata_id:
+                        st.info("Associated tags and tech stacks saved.")
+                    else:
+                        st.warning("Could not save tags and tech stacks for this job posting.")
 
-                # Optionally, save AI score and reasoning to parsed_metadata or a similar table
-                # This requires a function like add_or_update_parsed_metadata from core.db
-                # For now, this step is omitted as it's not a direct part of add_application
-
-                # Clear/reset relevant AI page session state for next use
+                # Clear inputs and analysis data after saving
                 st.session_state.ai_job_description_input = ""
-                st.session_state.ai_score_result = None
-                st.session_state.ai_reasoning_result = ""
-                st.session_state.ai_cover_letter_result = ""
-                st.session_state.ai_raw_score_response = ""
-                st.session_state.ai_raw_cl_response = ""
-                # Consider clearing job title and company, or let them persist.
-                # For now, they will clear on next rerun due to st.text_input behavior.
+                st.session_state.ai_job_title_save = "" # Now this should work
+                st.session_state.ai_company_name_save = "" # And this
+                st.session_state.confirmed_tags = []
+                st.session_state.confirmed_tech_stacks = []
+                st.session_state.selected_tags = []
+                st.session_state.selected_tech_stacks = []
+                st.session_state.ai_generated_tags = []
+                st.session_state.ai_generated_tech_stacks = []
+                st.session_state.show_analysis_results = False
+                
                 st.rerun() 
             else:
                 st.error("Failed to save application to database via AI Assistant page.")
-
-
-with col2_ai:
-    st.subheader("AI Analysis & Generated Content")
-    if st.session_state.ai_score_result is not None:
-        st.metric(label="Resume Match Score", value=f"{st.session_state.ai_score_result:.0f}/100")
-    if st.session_state.ai_reasoning_result:
-        with st.expander("Scoring Explanation", expanded=False):
-            st.markdown(st.session_state.ai_reasoning_result)
-    
-    if st.session_state.ai_cover_letter_result:
-        st.subheader("Generated Cover Letter")
-        st.text_area("Cover Letter Preview", value=st.session_state.ai_cover_letter_result, height=300, key="ai_cl_display_area", disabled=True)
-
-    # Display Raw AI Responses
-    if st.session_state.ai_raw_score_response:
-        with st.expander("Raw AI Response (Scoring)", expanded=False):
-            st.text_area("Raw Scoring Output", value=st.session_state.ai_raw_score_response, height=150, disabled=True, key="ai_raw_score_output")
-    
-    if st.session_state.ai_raw_cl_response:
-        with st.expander("Raw AI Response (Cover Letter)", expanded=False):
-            st.text_area("Raw Cover Letter Output", value=st.session_state.ai_raw_cl_response, height=150, disabled=True, key="ai_raw_cl_output")
-
-# Note: The section "Generate Cover Letter & Submit Application" from original Tab 1's expander
-# has been integrated into the main flow of this AI Assistant page.
-# The AI Assistant page focuses on AI actions first, then saving the application.
