@@ -3,15 +3,30 @@ import streamlit as st
 from pathlib import Path
 import time
 import subprocess # For Ollama CLI interaction
-import json # For parsing Ollama streaming responses
-import requests # For direct Ollama API access
+import json # For parsing Ollama responses
+import requests # For direct Ollama API access (commented out code)
+import re # For processing <think> tags
+import traceback # For enhanced error reporting
+
+# Import LangChain components
+try:
+    import langchain_community
+    from langchain_community.llms import Ollama
+    from langchain_core.prompts import PromptTemplate
+    from langchain_core.output_parsers import StrOutputParser
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    st.warning("LangChain packages not found. Consider installing with: pip install langchain langchain-community langchain-core")
 
 # Attempt to import OllamaLLM, fall back to Ollama if not found
 try:
     from langchain_ollama.llms import OllamaLLM
+    # Use OllamaLLM as preferred if available
 except ImportError:
     try:
-        from langchain_community.llms import Ollama
+        if not LANGCHAIN_AVAILABLE:
+            from langchain_community.llms import Ollama
         OllamaLLM = Ollama # Alias if new one not found
         st.warning("Consider upgrading to `langchain-ollama` for the latest Ollama integration. Using fallback `langchain_community.llms.Ollama`.")
     except ImportError:
@@ -19,7 +34,14 @@ except ImportError:
         st.error("Ollama LLM integration not found. Please install `langchain-ollama` or `langchain-community`.")
 
 from core.file_utils import save_uploaded_file, COVER_LETTERS_DIR, save_cover_letter, get_file_hash
-from core.ai_tools import extract_text_from_pdf, score_resume_job_description, generate_cover_letter, analyze_job_description_with_ollama 
+from core.ai_tools import (
+    extract_text_from_pdf, 
+    score_resume_job_description, 
+    generate_cover_letter, 
+    analyze_job_description_with_ollama,
+    analyze_job_description_with_langchain,
+    stream_langchain_response_with_think_processing
+)
 from core.db import add_file, get_files_by_type, add_job_posting, add_application, log_application_status, add_or_update_parsed_metadata # Added add_or_update_parsed_metadata
 
 st.set_page_config(layout="wide", page_title="AI Assistant")
@@ -77,8 +99,12 @@ if 'ai_selected_model_name' not in st.session_state:
     st.session_state.ai_selected_model_name = None
 if 'ai_llm_instance' not in st.session_state:
     st.session_state.ai_llm_instance = None
+if 'ai_langchain_llm' not in st.session_state:  # New LangChain LLM instance
+    st.session_state.ai_langchain_llm = None
 if 'ai_ollama_not_found' not in st.session_state:
     st.session_state.ai_ollama_not_found = False
+if 'use_langchain' not in st.session_state:  # Flag to enable LangChain processing
+    st.session_state.use_langchain = LANGCHAIN_AVAILABLE
 # Remove conversation chain to avoid LangChain deprecation warning
 if 'conversation_chain' in st.session_state:
     del st.session_state.conversation_chain
@@ -116,46 +142,70 @@ def get_ollama_models_ai_page():
 # Define the Ollama base URL
 OLLAMA_BASE_URL = "http://localhost:11434"
 
-# Function to stream responses directly from Ollama API
-def stream_ollama_response(prompt, model_name):
-    """Stream a response from Ollama API with proper error handling"""
-    # Prepare API endpoint and payload
-    api_url = f"{OLLAMA_BASE_URL}/api/generate"
-    payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "stream": True
-    }
+# Function to stream responses using LangChain (replacing direct Ollama API)
+# Previous direct Ollama API implementation has been commented out
+# def stream_ollama_response(prompt, model_name, ollama_base_url=OLLAMA_BASE_URL):
+#     """Stream a response from Ollama API directly (replaced with LangChain)"""
+#     api_url = f"{ollama_base_url}/api/generate"
+#     payload = {
+#         "model": model_name,
+#         "prompt": prompt,
+#         "stream": True
+#     }
+#     
+#     try:
+#         response = requests.post(api_url, json=payload, stream=True)
+#         response.raise_for_status()
+#         
+#         accumulated_response = ""
+#         for line in response.iter_lines():
+#             if not line:
+#                 continue
+#             
+#             try:
+#                 json_response = json.loads(line)
+#                 if 'response' in json_response:
+#                     chunk = json_response['response']
+#                     accumulated_response += chunk
+#                     yield chunk, accumulated_response
+#                 
+#                 if json_response.get('done', False):
+#                     break
+#             except json.JSONDecodeError:
+#                 print(f"Error decoding JSON: {line}")
+#     except Exception as e:
+#         print(f"Error with Ollama API: {e}")
+#         yield f"API error: {str(e)}", f"API error: {str(e)}"
+
+def stream_langchain_response(prompt, langchain_llm):
+    """Stream a response using LangChain with <think> tag processing and verbose debug output"""
+    print(f"DEBUG: Using LangChain streaming for prompt: {prompt[:100]}...")
+    
+    # Create a simple chain with verbose debugging
+    prompt_template = PromptTemplate.from_template("{context}")
+    chain = prompt_template | langchain_llm | StrOutputParser()
+    
+    # Stream the response and process it
+    accumulated_response = ""
+    print("DEBUG: Starting LangChain streaming response...")
+    start_time = time.time()
     
     try:
-        # Use requests's streaming for efficient delivery
-        with requests.post(api_url, json=payload, stream=True) as response:
-            response.raise_for_status()  # Raise error for bad responses
-            full_response = ""
-            
-            # Process each chunk as it arrives
-            for line in response.iter_lines():
-                if line:
-                    try:
-                        # Parse JSON from the line
-                        chunk = json.loads(line.decode('utf-8'))
-                        if 'response' in chunk:
-                            token = chunk['response']
-                            full_response += token
-                            yield token, full_response
-                        # Check for completion or error
-                        if chunk.get('done', False):
-                            break
-                    except json.JSONDecodeError:
-                        # Handle invalid JSON
-                        continue
-            
-            return full_response
-    except requests.RequestException as e:
-        # Handle request errors
-        error_msg = f"API error: {str(e)}"
-        yield error_msg, error_msg
-        return error_msg
+        for chunk in chain.stream({"context": prompt}):
+            if chunk:
+                # Debug output with chunk preview
+                chunk_preview = chunk[:50].replace('\n', ' ')
+                print(f"DEBUG: LangChain chunk received ({len(chunk)} chars): '{chunk_preview}...'")
+                
+                accumulated_response += chunk
+                yield chunk, accumulated_response
+        
+        elapsed_time = time.time() - start_time
+        print(f"DEBUG: LangChain streaming complete in {elapsed_time:.2f}s. Total response length: {len(accumulated_response)}")
+    except Exception as e:
+        print(f"DEBUG ERROR: Exception during LangChain streaming: {type(e).__name__}: {str(e)}")
+        # Re-raise to be handled by the caller
+        raise
 
 # --- AI Chat Section ---
 st.subheader("Chat with AI Job Assistant")
@@ -191,7 +241,9 @@ else:
             message_placeholder = st.empty()
             
             # Build context from chat history
-            context = "You are a helpful AI assistant specializing in job search advice, resume building, and interview preparation.\n\n"
+            context = "<think>I am a job search assistant specializing in career advice, resume building, and interview preparation. I'll think carefully about my response.</think>\n\n"
+            context += "You are a helpful AI assistant specializing in job search advice, resume building, and interview preparation.\n\n"
+            
             # Add last few messages for context
             for msg in st.session_state.chat_messages[-6:]:  # Last 6 messages (3 exchanges)
                 if msg["role"] == "user":
@@ -199,89 +251,104 @@ else:
                 else:
                     context += f"Assistant: {msg['content']}\n"
             
-            # Stream response
-            _final_processed_response_for_display_and_history = ""
-            # Variables to manage the first <think> block processing
-            _thinking_active = False
-            _think_start_time = 0.0
-            _first_think_block_processed = False
-            _text_before_first_think = ""
-            _thinking_duration_msg = "" # Stores "⏳ Thinking... (took Xs)\\n\\n"
+            # Add the current query
+            context += f"\nHuman: {user_query}\nAssistant:"
             
-            raw_cumulative_response_from_model = "" # Holds the latest full raw response
-
+            # All processing now uses LangChain - direct Ollama API calls have been removed
+            message_placeholder.info("Processing with LangChain...")
+            _final_processed_response_for_display_and_history = ""
+            
+            print(f"DEBUG: Chat request with query: '{user_query}', using model: {st.session_state.ai_selected_model_name}")
+            print(f"DEBUG: Starting chat response generation with LangChain")
+            print(f"DEBUG: LangChain LLM type: {type(st.session_state.ai_langchain_llm).__name__}")
+            print(f"DEBUG: Full context length: {len(context)} chars")
+            
             try:
-                for token_chunk, current_raw_cumulative in stream_ollama_response(context, st.session_state.ai_selected_model_name):
-                    # Handle potential error message from the stream_ollama_response generator itself
-                    if isinstance(token_chunk, str) and "API error:" in token_chunk and current_raw_cumulative == token_chunk:
-                        message_placeholder.error(token_chunk)
-                        _final_processed_response_for_display_and_history = token_chunk
-                        break  # Stop processing on API error
-
-                    raw_cumulative_response_from_model = current_raw_cumulative
-                    current_display_text = ""
-
-                    if not _first_think_block_processed:
-                        think_start_tag = "<think>"
-                        think_end_tag = "</think>"
+                if LANGCHAIN_AVAILABLE and st.session_state.ai_langchain_llm:
+                    # Define a callback for UI updates
+                    def update_ui(text, cursor=""):
+                        message_placeholder.markdown(text + cursor)
                         
-                        start_idx = raw_cumulative_response_from_model.find(think_start_tag)
-                        
-                        if start_idx != -1: # <think> tag is present
-                            if not _thinking_active: # First time encountering <think> for this block
-                                _thinking_active = True
-                                _think_start_time = time.time()
-                                _text_before_first_think = raw_cumulative_response_from_model[:start_idx]
-                            
-                            end_idx = raw_cumulative_response_from_model.find(think_end_tag, start_idx + len(think_start_tag))
-                            
-                            if end_idx != -1: # </think> tag also present, completing the block
-                                duration = time.time() - _think_start_time
-                                _thinking_duration_msg = f"⏳ Thinking... (took {duration:.1f}s)\\n\\n"
-                                
-                                content_after_first_think = raw_cumulative_response_from_model[end_idx + len(think_end_tag):]
-                                current_display_text = _text_before_first_think + _thinking_duration_msg + content_after_first_think
-                                
-                                _first_think_block_processed = True
-                                _thinking_active = False 
-                            else: # <think> present, but </think> not yet
-                                current_display_text = _text_before_first_think + "⏳ Thinking..."
-                        else: # No <think> tag encountered yet in the response
-                            current_display_text = raw_cumulative_response_from_model
-                    else: # First <think> block already processed
-                        # Reconstruct display using the raw response and the stored thinking message
-                        s_idx_raw = raw_cumulative_response_from_model.find("<think>")
-                        e_idx_raw = -1
-                        if s_idx_raw != -1:
-                            e_idx_raw = raw_cumulative_response_from_model.find("</think>", s_idx_raw + len("<think>"))
-                        
-                        if s_idx_raw != -1 and e_idx_raw != -1: # First think block still identifiable in raw
-                            text_before_current_raw_think = raw_cumulative_response_from_model[:s_idx_raw]
-                            text_after_current_raw_think = raw_cumulative_response_from_model[e_idx_raw + len("</think>"):]
-                            current_display_text = text_before_current_raw_think + _thinking_duration_msg + text_after_current_raw_think
-                        else:
-                            # Fallback if the original think block structure is lost in the raw stream,
-                            # though this shouldn't happen if the model is consistent.
-                            # This implies we append new raw data to the previously formed message.
-                            # For simplicity, we assume the transformation can be reapplied if tags are present.
-                            # If not, it defaults to showing the raw response from this point.
-                            current_display_text = raw_cumulative_response_from_model
-
-
-                    message_placeholder.markdown(current_display_text + "▌")
-                    _final_processed_response_for_display_and_history = current_display_text
+                    # Stream and process the response using the core function
+                    print("DEBUG: Calling stream_langchain_response_with_think_processing")
+                    print(f"DEBUG: Context preview: {context[:200]}...")
+                    
+                    # Create streaming chain directly for more control
+                    stream = st.session_state.ai_langchain_llm.stream(context)
+                    
+                    # Measure processing time for debugging
+                    process_start_time = time.time()
+                    raw_response, display_response = stream_langchain_response_with_think_processing(
+                        stream, 
+                        response_callback=update_ui
+                    )
+                    process_time = time.time() - process_start_time
+                    
+                    print(f"DEBUG: Processing completed in {process_time:.2f}s")
+                    print(f"DEBUG: Raw response length: {len(raw_response)}")
+                    print(f"DEBUG: Display response length: {len(display_response)}")
+                    
+                    # Store the processed response
+                    _final_processed_response_for_display_and_history = display_response
+                    print(f"DEBUG: Response processing complete. Display length: {len(display_response)}")
+                else:
+                    error_msg = "LangChain processing is not available. Please enable LangChain in the sidebar."
+                    message_placeholder.error(error_msg)
+                    _final_processed_response_for_display_and_history = error_msg
+            except Exception as e:
+                error_msg = f"Error with LangChain processing: {str(e)}"
+                print(f"DEBUG ERROR: {error_msg}")
+                print(f"DEBUG ERROR TYPE: {type(e).__name__}")
+                print(f"DEBUG ERROR DETAILS: {e}")
+                import traceback
+                print(f"DEBUG ERROR TRACEBACK: {traceback.format_exc()}")
                 
-                # Loop finished
+                # Enhanced error message for UI
+                message_placeholder.error(error_msg)
+                _final_processed_response_for_display_and_history = f"I'm sorry, I encountered an error: {str(e)}"
+                
+            # Variables used by the <think> processing
+            _thinking_active = False
+            _first_think_block_processed = False
+            raw_cumulative_response_from_model = "" # For compatibility with existing code
+
+            # Direct streaming with Ollama API has been commented out
+            # We're now exclusively using LangChain with stream_langchain_response_with_think_processing
+            try:
+                # No need for a streaming loop here, as we're using the callback-based streaming
+                # in stream_langchain_response_with_think_processing
+                
+                # Log completion with detailed info
+                print("DEBUG: Chat response generation complete")
+                print(f"DEBUG: Final response length: {len(_final_processed_response_for_display_and_history)} chars")
+                
+                # Check for <think> tags in final response (shouldn't be any)
+                if "<think>" in _final_processed_response_for_display_and_history:
+                    print("DEBUG WARNING: <think> tag found in final response!")
+                if "</think>" in _final_processed_response_for_display_and_history:
+                    print("DEBUG WARNING: </think> tag found in final response!")
+                
+                # Final response is already stored in _final_processed_response_for_display_and_history
+                # from the stream_langchain_response_with_think_processing function
+                
+                # Update UI and chat history with final response
                 if _final_processed_response_for_display_and_history:
+                    print("DEBUG: Updating UI with final response")
                     message_placeholder.markdown(_final_processed_response_for_display_and_history)
                     # Add the processed response to chat history
                     st.session_state.chat_messages.append({"role": "assistant", "content": _final_processed_response_for_display_and_history})
+                    print("DEBUG: Response added to chat history")
                 elif not ("API error:" in _final_processed_response_for_display_and_history): # Avoid double error message if API error already handled
+                    print("DEBUG ERROR: Empty response received from LangChain")
                     message_placeholder.error("Failed to generate a response. Please try again.")
                     st.session_state.chat_messages.append({"role": "assistant", "content": "Failed to generate a response."})
 
             except Exception as e:
                 error_msg = f"Error during AI response processing: {str(e)}"
+                print(f"DEBUG ERROR: {error_msg}")
+                print(f"DEBUG ERROR TYPE: {type(e).__name__}")
+                import traceback
+                print(f"DEBUG ERROR TRACEBACK: {traceback.format_exc()}")
                 message_placeholder.error(error_msg)
                 st.session_state.chat_messages.append({"role": "assistant", "content": f"I'm sorry, I encountered an error: {str(e)}"})
             
@@ -386,6 +453,7 @@ with st.sidebar:
     if st.session_state.ai_ollama_not_found:
         st.error("Ollama command not found. Ensure Ollama is installed and in PATH.")
         st.session_state.ai_llm_instance = None
+        st.session_state.ai_langchain_llm = None
     else:
         available_models_ai = get_ollama_models_ai_page()
         if available_models_ai:
@@ -408,7 +476,33 @@ with st.sidebar:
             if st.session_state.ai_llm_instance is None or st.session_state.ai_selected_model_name != chosen_model_name_ai:
                 with st.spinner(f"Initializing AI model: {chosen_model_name_ai}..."):
                     try:
-                        st.session_state.ai_llm_instance = OllamaLLM(model=chosen_model_name_ai, timeout=120)
+                        # For direct Ollama API
+                        st.session_state.ai_llm_instance = chosen_model_name_ai
+                        
+                        # For LangChain integration if available
+                        if LANGCHAIN_AVAILABLE:
+                            try:
+                                print(f"DEBUG: Initializing LangChain with model {chosen_model_name_ai}")
+                                # Create the LangChain LLM instance
+                                st.session_state.ai_langchain_llm = Ollama(model=chosen_model_name_ai)
+                                
+                                # Test if it's working with a simple invoke
+                                print("DEBUG: Testing LangChain LLM with a simple invoke")
+                                test_start_time = time.time()
+                                test_response = st.session_state.ai_langchain_llm.invoke("Test")
+                                test_elapsed = time.time() - test_start_time
+                                
+                                print(f"DEBUG: LangChain test successful in {test_elapsed:.2f}s")
+                                print(f"DEBUG: Test response length: {len(test_response)} chars")
+                                st.success(f"LangChain integration enabled with {chosen_model_name_ai}")
+                            except Exception as e:
+                                print(f"DEBUG ERROR: LangChain initialization failed: {type(e).__name__}: {e}")
+                                import traceback
+                                print(f"DEBUG ERROR TRACEBACK: {traceback.format_exc()}")
+                                st.warning(f"LangChain initialization failed: {e}")
+                                st.session_state.ai_langchain_llm = None
+                                st.session_state.use_langchain = False
+                        
                         st.session_state.ai_selected_model_name = chosen_model_name_ai
                         
                         # Add a welcome message when model changes
@@ -424,6 +518,26 @@ with st.sidebar:
                         st.error(f"Failed to initialize model {chosen_model_name_ai}: {e}")
                         st.session_state.ai_llm_instance = None
                         st.session_state.ai_selected_model_name = None
+            
+            # LangChain checkbox toggle (only if LangChain is available and langchain_llm exists)
+            if LANGCHAIN_AVAILABLE and st.session_state.ai_langchain_llm:
+                prev_value = st.session_state.use_langchain
+                st.session_state.use_langchain = st.checkbox(
+                    "Use LangChain processing", 
+                    value=st.session_state.use_langchain,
+                    help="When enabled, uses LangChain for response handling with <think> tag processing"
+                )
+                
+                # Debug information when toggle changes
+                if prev_value != st.session_state.use_langchain:
+                    new_state = "enabled" if st.session_state.use_langchain else "disabled"
+                    print(f"DEBUG: LangChain processing {new_state} by user")
+            else:
+                # Debug why the LangChain toggle isn't shown
+                if not LANGCHAIN_AVAILABLE:
+                    print("DEBUG: LangChain toggle not shown because LangChain is not available")
+                else:
+                    print("DEBUG: LangChain toggle not shown because langchain_llm is not initialized")
         else:
             st.warning("No Ollama models found or Ollama is not running. AI features will be disabled.")
             st.session_state.ai_llm_instance = None
@@ -460,10 +574,34 @@ with col1_jd_analysis:
 if analyze_jd_button and st.session_state.ai_job_description_input:
     if st.session_state.ai_llm_instance and st.session_state.ai_selected_model_name:
         with st.spinner("Analyzing job description... This may take a moment."):
-            analysis_results = analyze_job_description_with_ollama(
-                st.session_state.ai_job_description_input,
-                st.session_state.ai_selected_model_name
-            )
+            # Use LangChain if enabled and available
+            print(f"DEBUG: Job description analysis - LangChain enabled: {LANGCHAIN_AVAILABLE and st.session_state.use_langchain}")
+            
+            if LANGCHAIN_AVAILABLE and st.session_state.use_langchain and st.session_state.ai_langchain_llm:
+                print(f"DEBUG: Using LangChain for job description analysis (model: {st.session_state.ai_selected_model_name})")
+                print(f"DEBUG: Job description length: {len(st.session_state.ai_job_description_input)} chars")
+                
+                # Measure processing time
+                start_time = time.time()
+                analysis_results, raw_response = analyze_job_description_with_langchain(
+                    st.session_state.ai_langchain_llm,
+                    st.session_state.ai_job_description_input
+                )
+                elapsed_time = time.time() - start_time
+                
+                print(f"DEBUG: LangChain job analysis completed in {elapsed_time:.2f}s")
+                # Log the results summarily
+                tags_count = len(analysis_results.get("tags", []))
+                tech_stacks_count = len(analysis_results.get("tech_stacks", []))
+                print(f"DEBUG: Analysis found {tags_count} tags and {tech_stacks_count} tech stacks")
+                print(f"DEBUG: Raw response length: {len(raw_response)} chars")
+            else:
+                print("DEBUG: Using direct Ollama API for job description analysis (deprecated)")
+                print("DEBUG: This code path will be fully removed in the future")
+                analysis_results = analyze_job_description_with_ollama(
+                    st.session_state.ai_job_description_input,
+                    st.session_state.ai_selected_model_name
+                )
         if analysis_results and (analysis_results.get("tags") or analysis_results.get("tech_stacks")):
             st.session_state.ai_generated_tags = analysis_results.get("tags", [])
             st.session_state.ai_generated_tech_stacks = analysis_results.get("tech_stacks", [])
