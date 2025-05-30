@@ -1,0 +1,41 @@
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database files
+data/
+
+# Test files
+test/
+
+# model files
+core/model/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/

@@ -1,15 +1,21 @@
 \
 from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser # Ensure StrOutputParser is imported
 from langchain.chains import LLMChain
 # Assuming PyPDF2 is used for PDF parsing. Add to requirements if not already there.
 # You might need to install it: pip install pypdf2
-import PyPDF2
+from PyPDF2 import PdfReader # Correctly import PdfReader
 import requests # Added for direct Ollama API calls
-import json # Added for parsing Ollama responses
-import re # Added for regex processing of <think> tags
+import json # Added for parsing Ollama responses and Pydantic fallback
+import re # Added for regex processing of <think> tags and JSON cleaning
 import time # Added for timing <think> processing
+
+# New imports for Pydantic and typing
+from typing import List, Optional, Tuple
+from pydantic import BaseModel, Field
+from langchain_core.output_parsers import PydanticOutputParser
+
 
 OLLAMA_BASE_URL = "http://localhost:11434" # Define default base URL, can be overridden
 
@@ -17,10 +23,11 @@ def extract_text_from_pdf(pdf_file_path: str) -> str:
     """Extracts text from a PDF file."""
     try:
         with open(pdf_file_path, 'rb') as pdf_file:
-            reader = PyPDF2.PdfReader(pdf_file)
+            reader = PdfReader(pdf_file) # Use the imported PdfReader
             text = ""
             for page_num in range(len(reader.pages)):
-                text += reader.pages[page_num].extract_text() or ""
+               page = reader.pages[page_num]
+               text += page.extract_text() or ""
         return text
     except Exception as e:
         print(f"Error extracting text from PDF {pdf_file_path}: {e}")
@@ -189,10 +196,22 @@ JSON Output:
         print(f"An unexpected error occurred in analyze_job_description_with_ollama: {e}")
         return {"tags": [], "tech_stacks": []}
 
-def analyze_job_description_with_langchain(llm, job_description_text: str) -> tuple[dict, str]:
+# Pydantic model for structured job posting details
+class JobPostingDetails(BaseModel):
+    job_title: Optional[str] = Field(default=None, description="The official title of the position.")
+    company: Optional[str] = Field(default=None, description="The name of the company hiring.")
+    location: Optional[str] = Field(default=None, description="The location of the job (e.g., 'City, State', 'Remote').")
+    salary_range: Optional[str] = Field(default=None, description="The salary range for the job, if specified (e.g., '$100k - $120k per year').")
+    required_skills: List[str] = Field(default_factory=list, description="A list of essential skills, qualifications, or experience explicitly mentioned as required.")
+    preferred_skills: List[str] = Field(default_factory=list, description="A list of desired but not essential skills, qualifications, or experience.")
+    description_summary: Optional[str] = Field(default=None, description="A concise summary of the job's main responsibilities and purpose.")
+    tags: List[str] = Field(default_factory=list, description="A list of general keywords or categories relevant to the job (e.g., 'fintech', 'healthcare', 'full-time', 'contract'). Do not include skills or technologies here.")
+    tech_stacks: List[str] = Field(default_factory=list, description="A list of specific technologies, programming languages, frameworks, tools, and methodologies (e.g., 'Python', 'React', 'AWS', 'Agile', 'Scrum').")
+
+def analyze_job_description_with_langchain(llm, job_description_text: str) -> Tuple[Optional[JobPostingDetails], str]:
     """
     Analyzes a job description using LangChain and a provided LLM to extract
-    relevant tags and technology stacks.
+    structured details based on the JobPostingDetails Pydantic model.
 
     Args:
         llm: A LangChain LLM instance (e.g., Ollama)
@@ -200,72 +219,116 @@ def analyze_job_description_with_langchain(llm, job_description_text: str) -> tu
 
     Returns:
         A tuple containing:
-        - dict: Contains 'tags' and 'tech_stacks' lists
-        - str: The raw response from the LLM (including any <think> tags)
+        - Optional[JobPostingDetails]: An instance of JobPostingDetails if parsing is successful, else None.
+        - str: The raw response string from the LLM.
     """
-    prompt = f"""
-Analyze the following job description and extract key information.
+    parser = PydanticOutputParser(pydantic_object=JobPostingDetails)
+
+    prompt_template_str = """
 <think>
-I'll carefully read through the job description and identify:
-1. General skills, qualifications, and concepts mentioned
-2. Specific technologies, programming languages, and tools required
+I need to carefully read the job description and extract specific pieces of information.
+The target information fields are:
+- job_title: The official title of the position.
+- company: The name of the hiring organization.
+- location: Where the job is based (city, state, or remote).
+- salary_range: Any mentioned salary or compensation details.
+- required_skills: Skills explicitly stated as necessary.
+- preferred_skills: Skills listed as advantageous or 'nice-to-have'.
+- description_summary: A brief overview of the role.
+- tags: General keywords like industry, employment type (e.g., 'e-commerce', 'full-time'). These should be distinct from skills and technologies.
+- tech_stacks: Specific technologies, languages, frameworks, tools (e.g., 'JavaScript', 'Docker', 'SQL').
+
+I must ensure the output is ONLY a valid JSON object that conforms to the provided schema.
+I will pay close attention to the types required for each field (string, list of strings).
+If information for a field is not present, I will use null for optional string fields or an empty list for list fields, as per the schema.
+I will avoid including generic phrases like "various technologies" in tech_stacks; instead, I will list specific items if mentioned.
+For skills and tech_stacks, I will try to list them as individual items in the list.
 </think>
 
-Return the information as a valid JSON object with two keys: "tags" and "tech_stacks".
-- "tags" should be a list of relevant keywords, skills, and concepts (e.g., "project management", "data analysis", "communication skills").
-- "tech_stacks" should be a list of specific technologies, programming languages, frameworks, tools, and methodologies (e.g., "Python", "React", "AWS", "CI/CD", "Agile").
+Extract the following information from the job post below.
+{format_instructions}
 
-Keep the lists concise and relevant to the job description. If no relevant items are found for a category, provide an empty list.
-
-Job Description:
+Job Post:
 ---
-{job_description_text}
+{job_description}
 ---
 
-JSON Output:
+Respond with JSON only. Do not include any other text before or after the JSON object.
+Ensure the JSON is well-formed.
 """
 
-    # Create a simple template
-    prompt_template = PromptTemplate.from_template("{prompt}")
-    
-    # Create the chain
-    chain = prompt_template | llm | StrOutputParser()
-    
+    prompt = PromptTemplate(
+        template=prompt_template_str,
+        input_variables=["job_description"],
+        partial_variables={"format_instructions": parser.get_format_instructions()}
+    )
+
+    # Chain to get raw string output first
+    chain = prompt | llm | StrOutputParser()
+
+    raw_response_text = ""
+    parsed_output: Optional[JobPostingDetails] = None
+
+    print(f"\\n--- Analyzing Job Description (LangChain with Pydantic) ---")
+    print(f"Job Description (first 200 chars): {job_description_text[:200]}...")
+
     try:
-        # Get the full response
-        result = chain.invoke({"prompt": prompt})
+        raw_response_text = chain.invoke({"job_description": job_description_text})
+        print(f"\\nDEBUG: Raw LLM response (analyze_job_description_with_langchain):\\n{raw_response_text}\\n")
+
+        # Attempt to clean and parse the JSON
+        # Step 1: Remove any <think>...</think> blocks first
+        cleaned_response = re.sub(r"<think>.*?</think>", "", raw_response_text, flags=re.DOTALL | re.IGNORECASE)
         
-        # Extract the JSON part
-        # Look for the first occurrence of a JSON-like structure (starts with { and has tags/tech_stacks)
-        json_start = result.find('{')
+        # Step 2: Extract JSON from markdown or direct
+        cleaned_json_str = cleaned_response 
+        match_json_block = re.search(r"```json\\s*([\\s\\S]*?)\\s*```", cleaned_json_str, re.DOTALL)
+        if match_json_block:
+            cleaned_json_str = match_json_block.group(1)
+        else:
+            match_any_block = re.search(r"```\\s*([\\s\\S]*?)\\s*```", cleaned_json_str, re.DOTALL)
+            if match_any_block:
+                cleaned_json_str = match_any_block.group(1)
         
-        if json_start != -1:
+        cleaned_json_str = cleaned_json_str.strip()
+        print(f"DEBUG: Cleaned JSON string for parsing:\\n{cleaned_json_str}\\n")
+
+
+        try:
+            # Try parsing the cleaned string with PydanticOutputParser
+            parsed_output = parser.parse(cleaned_json_str)
+            print(f"DEBUG: Successfully parsed with PydanticOutputParser:")
+            # Use .model_dump_json() for Pydantic v2+
+            print(parsed_output.model_dump_json(indent=2))
+        except Exception as pydantic_parse_error:
+            print(f"ERROR: PydanticOutputParser failed: {pydantic_parse_error}")
+            print(f"DEBUG: Cleaned JSON string that PydanticOutputParser failed on:\\n{cleaned_json_str}\\n")
+            # Fallback: try to load with json.loads directly, then validate with Pydantic model
             try:
-                # Try to parse everything from the first opening brace
-                json_data = json.loads(result[json_start:])
-                
-                tags = json_data.get("tags", [])
-                tech_stacks = json_data.get("tech_stacks", [])
-                
-                if not isinstance(tags, list):
-                    print(f"Warning: 'tags' field was not a list. Received: {tags}")
-                    tags = []
-                if not isinstance(tech_stacks, list):
-                    print(f"Warning: 'tech_stacks' field was not a list. Received: {tech_stacks}")
-                    tech_stacks = []
-                    
-                return {"tags": tags, "tech_stacks": tech_stacks}, result
-            except json.JSONDecodeError as e:
-                print(f"Error parsing JSON from LLM response: {e}")
-                print(f"Raw result: {result}")
-                return {"tags": [], "tech_stacks": []}, result
-        
-        # If we're here, couldn't find valid JSON
-        return {"tags": [], "tech_stacks": []}, result
-    
+                print("DEBUG: Attempting fallback parsing with json.loads and Pydantic model validation...")
+                raw_json_data = json.loads(cleaned_json_str)
+                parsed_output = JobPostingDetails(**raw_json_data)
+                print(f"DEBUG: Successfully parsed with json.loads and validated with Pydantic model:")
+                print(parsed_output.model_dump_json(indent=2))
+            except Exception as json_load_error:
+                print(f"ERROR: Fallback json.loads also failed: {json_load_error}")
+                print(f"DEBUG: Cleaned JSON string that json.loads failed on:\\n{cleaned_json_str}\\n")
+                parsed_output = None # Ensure it's None if all parsing fails
+
     except Exception as e:
-        print(f"An unexpected error occurred in analyze_job_description_with_langchain: {e}")
-        return {"tags": [], "tech_stacks": []}, str(e)
+        print(f"ERROR: Error during LangChain job description analysis pipeline: {e}")
+        # Ensure raw_response_text contains the error or is the response if available
+        if not raw_response_text:
+            raw_response_text = f"Error before LLM response could be obtained: {str(e)}"
+        else: # Append error to raw_response_text if it was already populated
+            raw_response_text += f"\\nPipeline Error: {str(e)}"
+        
+        # Print the state of raw_response_text at the time of error
+        print(f"DEBUG: Raw response text at time of pipeline error:\\n{raw_response_text}\\n")
+
+
+    print(f"--- End of Job Description Analysis (LangChain with Pydantic) ---")
+    return parsed_output, raw_response_text
 
 def stream_langchain_response_with_think_processing(chain_output_stream, response_callback=None):
     """

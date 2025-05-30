@@ -78,6 +78,10 @@ if 'ai_company_name_save' not in st.session_state:
 # New session state for job description analysis results
 if 'show_analysis_results' not in st.session_state:
     st.session_state.show_analysis_results = False
+if 'ai_parsed_job_details' not in st.session_state: # Stores the JobPostingDetails object
+    st.session_state.ai_parsed_job_details = None
+if 'ai_raw_jd_analysis_response' not in st.session_state: # Stores the raw LLM response for JD analysis
+    st.session_state.ai_raw_jd_analysis_response = ""
 if 'ai_generated_tags' not in st.session_state:
     st.session_state.ai_generated_tags = []
 if 'ai_generated_tech_stacks' not in st.session_state:
@@ -91,6 +95,10 @@ if 'confirmed_tags' not in st.session_state:
     st.session_state.confirmed_tags = []
 if 'confirmed_tech_stacks' not in st.session_state:
     st.session_state.confirmed_tech_stacks = []
+
+# Add session state for the raw LLM response from JD analysis for display
+if 'raw_llm_response_jd' not in st.session_state:
+    st.session_state.raw_llm_response_jd = ""
 
 
 # Model selection and LLM instance (can be shared or page-specific)
@@ -556,12 +564,21 @@ st.info("Use the chat interface above to interact with the AI for tasks like res
 st.subheader("Save Application Details")
 st.caption("If the AI helped you draft application details, you can save them here. You can also analyze the job description for tags and tech stacks.") # Updated caption
 
-ai_job_title_input = st.text_input("Job Title (can be extracted by AI):", value=st.session_state.ai_job_title_save, key="ai_job_title_save_widget")
-ai_company_name_input = st.text_input("Company Name (can be extracted by AI):", value=st.session_state.ai_company_name_save, key="ai_company_name_save_widget")
+# Use values from parsed details if available, otherwise use existing session state or empty
+ai_job_title_input = st.text_input(
+    "Job Title (can be extracted by AI):", 
+    value=st.session_state.ai_parsed_job_details.job_title if st.session_state.ai_parsed_job_details and st.session_state.ai_parsed_job_details.job_title else st.session_state.ai_job_title_save, 
+    key="ai_job_title_save_widget"
+)
+ai_company_name_input = st.text_input(
+    "Company Name (can be extracted by AI):", 
+    value=st.session_state.ai_parsed_job_details.company if st.session_state.ai_parsed_job_details and st.session_state.ai_parsed_job_details.company else st.session_state.ai_company_name_save, 
+    key="ai_company_name_save_widget"
+)
 # Job description is already in session state if needed for saving
 st.session_state.ai_job_description_input = st.text_area(
     "Job Description (can be extracted or summarized by AI):", 
-    value=st.session_state.ai_job_description_input, 
+    value=st.session_state.ai_parsed_job_details.description_summary if st.session_state.ai_parsed_job_details and st.session_state.ai_parsed_job_details.description_summary else st.session_state.ai_job_description_input, 
     height=150, 
     key="ai_job_desc_save"
 )
@@ -572,193 +589,217 @@ with col1_jd_analysis:
     analyze_jd_button = st.button("Analyze Job Description for Tags/Tech", key="analyze_jd_btn")
 
 if analyze_jd_button and st.session_state.ai_job_description_input:
-    if st.session_state.ai_llm_instance and st.session_state.ai_selected_model_name:
-        with st.spinner("Analyzing job description... This may take a moment."):
-            # Use LangChain if enabled and available
-            print(f"DEBUG: Job description analysis - LangChain enabled: {LANGCHAIN_AVAILABLE and st.session_state.use_langchain}")
-            
-            if LANGCHAIN_AVAILABLE and st.session_state.use_langchain and st.session_state.ai_langchain_llm:
-                print(f"DEBUG: Using LangChain for job description analysis (model: {st.session_state.ai_selected_model_name})")
-                print(f"DEBUG: Job description length: {len(st.session_state.ai_job_description_input)} chars")
-                
-                # Measure processing time
-                start_time = time.time()
-                analysis_results, raw_response = analyze_job_description_with_langchain(
-                    st.session_state.ai_langchain_llm,
+    if st.session_state.ai_langchain_llm and st.session_state.ai_selected_model_name: # Check for LangChain LLM
+        with st.spinner(f"Analyzing job description with {st.session_state.ai_selected_model_name} (LangChain)..."):
+            try:
+                # Call the updated LangChain analysis function
+                parsed_details, raw_response = analyze_job_description_with_langchain(
+                    st.session_state.ai_langchain_llm, 
                     st.session_state.ai_job_description_input
                 )
-                elapsed_time = time.time() - start_time
-                
-                print(f"DEBUG: LangChain job analysis completed in {elapsed_time:.2f}s")
-                # Log the results summarily
-                tags_count = len(analysis_results.get("tags", []))
-                tech_stacks_count = len(analysis_results.get("tech_stacks", []))
-                print(f"DEBUG: Analysis found {tags_count} tags and {tech_stacks_count} tech stacks")
-                print(f"DEBUG: Raw response length: {len(raw_response)} chars")
-            else:
-                print("DEBUG: Using direct Ollama API for job description analysis (deprecated)")
-                print("DEBUG: This code path will be fully removed in the future")
-                analysis_results = analyze_job_description_with_ollama(
-                    st.session_state.ai_job_description_input,
-                    st.session_state.ai_selected_model_name
-                )
-        if analysis_results and (analysis_results.get("tags") or analysis_results.get("tech_stacks")):
-            st.session_state.ai_generated_tags = analysis_results.get("tags", [])
-            st.session_state.ai_generated_tech_stacks = analysis_results.get("tech_stacks", [])
-            # Initialize selected with all generated, user can deselect
-            st.session_state.selected_tags = st.session_state.ai_generated_tags[:]
-            st.session_state.selected_tech_stacks = st.session_state.ai_generated_tech_stacks[:]
-            st.session_state.show_analysis_results = True
-            st.success("Job description analyzed. Review and confirm below.")
-            st.rerun() # Rerun to show the modal-like section
-        else:
-            st.error("Failed to analyze job description or no tags/tech stacks found.")
-            st.session_state.show_analysis_results = False
-    else:
-        st.warning("Please select an AI model from the sidebar to analyze the job description.")
-elif analyze_jd_button:
-    st.warning("Please enter a job description above to analyze.")
+                st.session_state.ai_parsed_job_details = parsed_details
+                st.session_state.ai_raw_jd_analysis_response = raw_response # Store raw response
 
-if st.session_state.show_analysis_results:
-    with st.expander("Confirm Extracted Tags and Tech Stacks", expanded=True):
-        st.markdown("#### Review and Modify AI Suggestions")
-
-        # Tags selection
-        st.markdown("**Suggested Tags:**")
-        # Use a temporary variable for multiselect to manage its state correctly during interaction
-        current_selected_tags = st.multiselect(
-            "Select relevant tags:",
-            options=list(set(st.session_state.ai_generated_tags + st.session_state.selected_tags)), # Show all, including manually added
-            default=st.session_state.selected_tags,
-            key="multiselect_tags"
-        )
-        st.session_state.selected_tags = current_selected_tags
-        
-        custom_tag_input = st.text_input("Add custom tag:", key="custom_tag_input")
-        if st.button("Add Tag", key="add_custom_tag_btn"):
-            if custom_tag_input and custom_tag_input not in st.session_state.selected_tags:
-                st.session_state.selected_tags.append(custom_tag_input)
-                # No need to clear custom_tag_input here, text_input handles its own state unless we force rerun
-                st.rerun() # Rerun to update multiselect and clear input if desired (or manage input clear manually)
-            elif custom_tag_input in st.session_state.selected_tags:
-                st.toast(f"Tag '{custom_tag_input}' already selected.")
-            else:
-                st.toast("Tag cannot be empty.")
-
-        st.divider()
-
-        # Tech Stacks selection
-        st.markdown("**Suggested Tech Stacks:**")
-        current_selected_tech_stacks = st.multiselect(
-            "Select relevant tech stacks:",
-            options=list(set(st.session_state.ai_generated_tech_stacks + st.session_state.selected_tech_stacks)),
-            default=st.session_state.selected_tech_stacks,
-            key="multiselect_tech_stacks"
-        )
-        st.session_state.selected_tech_stacks = current_selected_tech_stacks
-
-        custom_tech_stack_input = st.text_input("Add custom tech stack:", key="custom_tech_stack_input")
-        if st.button("Add Tech Stack", key="add_custom_tech_stack_btn"):
-            if custom_tech_stack_input and custom_tech_stack_input not in st.session_state.selected_tech_stacks:
-                st.session_state.selected_tech_stacks.append(custom_tech_stack_input)
-                st.rerun()
-            elif custom_tech_stack_input in st.session_state.selected_tech_stacks:
-                st.toast(f"Tech stack '{custom_tech_stack_input}' already selected.")
-            else:
-                st.toast("Tech stack cannot be empty.")
-        
-        st.divider()
-
-        # Confirmation and Cancel buttons
-        col_confirm, col_cancel = st.columns(2)
-        with col_confirm:
-            if st.button("Confirm Selections", key="confirm_analysis_btn"):
-                st.session_state.confirmed_tags = st.session_state.selected_tags[:]
-                st.session_state.confirmed_tech_stacks = st.session_state.selected_tech_stacks[:]
-                st.session_state.show_analysis_results = False
-                st.success("Tags and tech stacks confirmed. They will be saved with the application.")
-                st.rerun()
-        with col_cancel:
-            if st.button("Cancel Analysis", key="cancel_analysis_btn"):
-                # Reset selections to what was last confirmed or to generated if nothing confirmed yet
-                # Or simply hide and keep current selections for next time.
-                # For now, just hide.
-                st.session_state.show_analysis_results = False
-                st.info("Analysis confirmation cancelled.")
-                st.rerun()
-
-# Display confirmed tags/stacks if any, before save button
-if st.session_state.get('confirmed_tags') or st.session_state.get('confirmed_tech_stacks'):
-    st.markdown("---")
-    if st.session_state.get('confirmed_tags'):
-        st.markdown(f"**Confirmed Tags:** {", ".join(st.session_state.confirmed_tags)}")
-    if st.session_state.get('confirmed_tech_stacks'):
-        st.markdown(f"**Confirmed Tech Stacks:** {", ".join(st.session_state.confirmed_tech_stacks)}")
-    st.markdown("---")
-
-# Enable save if job title is present
-save_app_button_ai = st.button("Save Application to Tracker", key="ai_save_app_btn_new", disabled=not ai_job_title_input)
-
-if save_app_button_ai:
-    if not ai_job_title_input or not ai_company_name_input: # Require title and company for job posting
-        st.error("Job Title and Company Name are required to save the application.")
-    else:
-        # 1. Add Job Posting
-        job_posting_id = add_job_posting(
-            title=ai_job_title_input,
-            company=ai_company_name_input,
-            description=st.session_state.ai_job_description_input
-        )
-
-        if not job_posting_id:
-            st.error("Failed to create or retrieve job posting entry.")
-        else:
-            # Cover letter and resume are now handled differently (e.g., via chat commands or specific tools)
-            # For saving an application, we might need a way to select/link files if they were generated or uploaded.
-            # This part needs to be re-thought based on new AI tool workflows.
-            # For now, we'll assume resume_file_id might still be relevant if a resume was selected in the sidebar.
-            cover_letter_file_id_ai = None # Placeholder - will be set if a CL is generated and saved by a new tool
-            current_resume_file_id = st.session_state.get('ai_resume_id') # From sidebar selection
-
-            app_id_ai = add_application(
-                job_posting_id=job_posting_id,
-                resume_file_id=current_resume_file_id, 
-                cover_letter_file_id=cover_letter_file_id_ai, # This will likely be None for now
-                submission_method=None, 
-                notes="Application details potentially drafted with AI Assistant. Specific files (e.g., cover letter) may need to be linked manually or via new AI tools."
-            )
-            if app_id_ai:
-                st.success(f"Application for '{st.session_state.ai_job_title_save}' saved with ID: {app_id_ai}. View/edit in Job Tracker.") # Use session state value for display
-                log_application_status(app_id_ai, "Draft", "Application created via AI Assistant")
-                
-                # Save confirmed tags and tech stacks to parsed_metadata
-                if st.session_state.get('confirmed_tags') or st.session_state.get('confirmed_tech_stacks'):
-                    tags_json = json.dumps(st.session_state.get('confirmed_tags', []))
-                    tech_stacks_json = json.dumps(st.session_state.get('confirmed_tech_stacks', []))
+                if parsed_details:
+                    st.success("Job description analyzed successfully!")
+                    # Populate session state from parsed_details
+                    st.session_state.ai_job_title_save = parsed_details.job_title or ""
+                    st.session_state.ai_company_name_save = parsed_details.company or ""
+                    # If description_summary is good, update the main JD input, otherwise keep user's
+                    if parsed_details.description_summary:
+                         st.session_state.ai_job_description_input = parsed_details.description_summary
                     
-                    metadata_id = add_or_update_parsed_metadata(
-                        job_posting_id=job_posting_id,
-                        tags=tags_json,
-                        tech_stacks=tech_stacks_json
-                        # Seniority and industry can be added later if extracted
-                    )
-                    if metadata_id:
-                        st.info("Associated tags and tech stacks saved.")
-                    else:
-                        st.warning("Could not save tags and tech stacks for this job posting.")
+                    st.session_state.ai_generated_tags = parsed_details.tags
+                    st.session_state.ai_generated_tech_stacks = parsed_details.tech_stacks
+                    
+                    # Initialize selected_tags and selected_tech_stacks with AI suggestions
+                    st.session_state.selected_tags = parsed_details.tags[:]
+                    st.session_state.selected_tech_stacks = parsed_details.tech_stacks[:]
+                    
+                    st.session_state.show_analysis_results = True
+                    # Rerun to update the input fields and show analysis results
+                    st.rerun() 
+                else:
+                    st.error("Failed to extract structured details from the job description. See raw output below.")
+                    st.session_state.show_analysis_results = False # Keep it false or reset
 
-                # Clear inputs and analysis data after saving
+            except Exception as e:
+                st.error(f"Error during LangChain job description analysis: {e}")
+                st.session_state.ai_raw_jd_analysis_response = f"Analysis Error: {str(e)}\\n{traceback.format_exc()}"
+                st.session_state.show_analysis_results = False
+                st.session_state.ai_parsed_job_details = None
+    else:
+        st.warning("Please select a LangChain compatible model from the sidebar to analyze the job description.")
+elif analyze_jd_button:
+    st.warning("Please enter a job description to analyze.")
+
+# Display analysis results and confirmation UI
+if st.session_state.show_analysis_results and st.session_state.ai_parsed_job_details:
+    st.subheader("AI Analysis Results:")
+    details = st.session_state.ai_parsed_job_details
+    
+    # Display other extracted fields (read-only for now, or could be made editable)
+    if details.job_title: st.write(f"**Job Title:** {details.job_title}")
+    if details.company: st.write(f"**Company:** {details.company}")
+    if details.location: st.write(f"**Location:** {details.location}")
+    if details.salary_range: st.write(f"**Salary Range:** {details.salary_range}")
+    if details.description_summary: 
+        with st.expander("AI Generated Summary", expanded=False):
+            st.markdown(details.description_summary)
+    if details.required_skills:
+        with st.expander("Required Skills", expanded=False):
+            st.markdown("- " + "\\n- ".join(details.required_skills))
+    if details.preferred_skills:
+        with st.expander("Preferred Skills", expanded=False):
+            st.markdown("- " + "\\n- ".join(details.preferred_skills))
+
+    st.markdown("---")
+    st.markdown("**Confirm or Edit Tags and Tech Stacks:**")
+
+    col_tags, col_tech_stacks = st.columns(2)
+    with col_tags:
+        st.session_state.selected_tags = st.multiselect(
+            "Suggested Tags:",
+            options=list(set(st.session_state.ai_generated_tags + st.session_state.selected_tags)), # Combine and unique
+            default=st.session_state.selected_tags,
+            key="multiselect_tags_ai"
+        )
+        new_tag = st.text_input("Add new tag:", key="new_tag_ai").strip()
+        if st.button("Add Tag", key="add_tag_btn_ai") and new_tag and new_tag not in st.session_state.selected_tags:
+            st.session_state.selected_tags.append(new_tag)
+            st.rerun() # Rerun to update multiselect
+
+    with col_tech_stacks:
+        st.session_state.selected_tech_stacks = st.multiselect(
+            "Suggested Tech Stacks:",
+            options=list(set(st.session_state.ai_generated_tech_stacks + st.session_state.selected_tech_stacks)), # Combine and unique
+            default=st.session_state.selected_tech_stacks,
+            key="multiselect_tech_stacks_ai"
+        )
+        new_tech_stack = st.text_input("Add new tech stack:", key="new_tech_stack_ai").strip()
+        if st.button("Add Tech Stack", key="add_tech_stack_btn_ai") and new_tech_stack and new_tech_stack not in st.session_state.selected_tech_stacks:
+            st.session_state.selected_tech_stacks.append(new_tech_stack)
+            st.rerun() # Rerun to update multiselect
+    
+    if st.button("Confirm Tags & Tech Stacks", key="confirm_tags_stacks_btn"):
+        st.session_state.confirmed_tags = st.session_state.selected_tags[:]
+        st.session_state.confirmed_tech_stacks = st.session_state.selected_tech_stacks[:]
+        st.success("Tags and Tech Stacks confirmed!")
+        # Optionally, hide the analysis section or provide further actions
+        # st.session_state.show_analysis_results = False # To hide after confirmation
+        # st.rerun()
+
+# Expander for Raw LLM Output from JD Analysis
+if st.session_state.ai_raw_jd_analysis_response:
+    with st.expander("Raw LLM Output (Job Description Analysis)", expanded=False):
+        st.text_area("Raw Response:", value=st.session_state.ai_raw_jd_analysis_response, height=200, disabled=True, key="raw_jd_response_display")
+
+
+# --- Resume Scoring and Cover Letter Generation (Placeholder for now) ---
+# These sections would be updated to use the parsed job details if available.
+st.divider()
+st.subheader("Resume Scoring & Cover Letter Generation")
+
+# ... (rest of the file, including resume scoring, cover letter, and save application logic)
+# Ensure the "Save Application" button logic uses the confirmed tags/stacks and other details
+
+# Example of how Save Application might use the data:
+save_application_button = st.button("Save Application to Tracker", key="save_application_ai_btn")
+if save_application_button:
+    # Retrieve values from input fields, which might have been populated by AI
+    job_title_to_save = ai_job_title_input # From text_input widget
+    company_name_to_save = ai_company_name_input # From text_input widget
+    job_description_to_save = st.session_state.ai_job_description_input # From text_area
+
+    if not job_title_to_save or not company_name_to_save:
+        st.error("Job Title and Company Name are required to save the application.")
+    elif not st.session_state.ai_resume_id:
+        st.error("A resume must be selected or uploaded to associate with this application.")
+    else:
+        # Use confirmed tags and tech stacks
+        tags_to_save = st.session_state.confirmed_tags
+        tech_stacks_to_save = st.session_state.confirmed_tech_stacks
+        
+        # Add job posting and get its ID
+        # Pass all available details from st.session_state.ai_parsed_job_details if it exists
+        job_post_details_for_db = {}
+        if st.session_state.ai_parsed_job_details:
+            pjd = st.session_state.ai_parsed_job_details
+            job_post_details_for_db = {
+                "title": pjd.job_title, # Use parsed title if available
+                "company": pjd.company, # Use parsed company if available
+                "location": pjd.location,
+                "salary_range": pjd.salary_range,
+                "description": job_description_to_save, # This could be summary or full
+                "required_skills": ", ".join(pjd.required_skills) if pjd.required_skills else None,
+                "preferred_skills": ", ".join(pjd.preferred_skills) if pjd.preferred_skills else None,
+                # tags and tech_stacks are handled separately below
+            }
+        else: # Fallback if no parsed details
+             job_post_details_for_db = {
+                "title": job_title_to_save,
+                "company": company_name_to_save,
+                "description": job_description_to_save,
+             }
+
+
+        # Ensure title and company are not None before db insertion
+        if not job_post_details_for_db.get("title"): job_post_details_for_db["title"] = "N/A"
+        if not job_post_details_for_db.get("company"): job_post_details_for_db["company"] = "N/A"
+
+
+        job_posting_id = add_job_posting(
+            title=job_post_details_for_db["title"],
+            company=job_post_details_for_db["company"],
+            description=job_post_details_for_db.get("description"),
+            location=job_post_details_for_db.get("location"),
+            salary_range=job_post_details_for_db.get("salary_range"),
+            # Pass tags and tech_stacks directly to add_job_posting if it handles them
+            # Otherwise, they will be linked via add_or_update_parsed_metadata
+            tags_list=tags_to_save, # Pass the confirmed lists
+            tech_stacks_list=tech_stacks_to_save # Pass the confirmed lists
+        )
+
+        if job_posting_id:
+            # Add application
+            application_id = add_application(
+                job_posting_id=job_posting_id,
+                resume_file_id=st.session_state.ai_resume_id, # Use the ID of the selected/uploaded resume
+                # cover_letter_file_id can be added later if a cover letter is generated and saved
+            )
+            if application_id:
+                st.success(f"Application for '{job_title_to_save}' at '{company_name_to_save}' saved with ID: {application_id}")
+                log_application_status(application_id, "Draft") # Initial status
+
+                # Save parsed metadata (tags, tech_stacks, skills) if Pydantic object exists
+                if st.session_state.ai_parsed_job_details:
+                    pjd = st.session_state.ai_parsed_job_details
+                    add_or_update_parsed_metadata(
+                        job_posting_id=job_posting_id,
+                        tags=pjd.tags, # Use tags from Pydantic model
+                        tech_stacks=pjd.tech_stacks, # Use tech_stacks from Pydantic model
+                        required_skills=pjd.required_skills,
+                        preferred_skills=pjd.preferred_skills,
+                        # Add other fields from pjd if your DB schema supports them
+                        # e.g., extracted_job_title=pjd.job_title, extracted_company=pjd.company, etc.
+                    )
+                    st.info("Associated AI-extracted metadata saved.")
+                
+                # Clear relevant session state after saving
+                st.session_state.ai_job_title_save = ""
+                st.session_state.ai_company_name_save = ""
                 st.session_state.ai_job_description_input = ""
-                st.session_state.ai_job_title_save = "" # Now this should work
-                st.session_state.ai_company_name_save = "" # And this
-                st.session_state.confirmed_tags = []
-                st.session_state.confirmed_tech_stacks = []
-                st.session_state.selected_tags = []
-                st.session_state.selected_tech_stacks = []
+                st.session_state.ai_parsed_job_details = None
+                st.session_state.ai_raw_jd_analysis_response = ""
                 st.session_state.ai_generated_tags = []
                 st.session_state.ai_generated_tech_stacks = []
+                st.session_state.selected_tags = []
+                st.session_state.selected_tech_stacks = []
+                st.session_state.confirmed_tags = []
+                st.session_state.confirmed_tech_stacks = []
                 st.session_state.show_analysis_results = False
-                
-                st.rerun() 
+                st.rerun() # Refresh to clear inputs and show success
             else:
-                st.error("Failed to save application to database via AI Assistant page.")
+                st.error("Failed to save application details.")
+        else:
+            st.error("Failed to save job posting details.")
