@@ -2,9 +2,9 @@ import streamlit as st
 import logging
 from typing import List, Dict, Optional, Literal
 from core.LLM_backends import (
-    LLMBackend, LlamaCppBackend, OllamaBackend, 
-    LangChainBackend, get_ollama_models
+    LLMBackend, LlamaCppBackend, OllamaBackend, get_ollama_models
 )
+from core.langchain_tools import LangChainBackend
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

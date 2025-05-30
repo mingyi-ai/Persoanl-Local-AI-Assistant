@@ -1,8 +1,8 @@
 import streamlit as st
-from core.db import init_db
+from core.database import Base, engine
 
-# Initialize database (idempotent)
-init_db()
+# Initialize database by creating all tables (idempotent)
+Base.metadata.create_all(bind=engine)
 
 # --- Streamlit App UI ---
 st.set_page_config(layout="wide", page_title="Job Application Assistant")

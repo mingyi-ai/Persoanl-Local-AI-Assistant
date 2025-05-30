@@ -1,24 +1,32 @@
 # Job Tracker Page
-
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
-from pathlib import Path
-import hashlib # Import hashlib
-# Updated imports for the new DB schema
-from core.db import (
-    add_job_posting, add_application, add_file, log_application_status,
-    get_applications_with_latest_status, get_full_application_details,
-    update_job_posting_details, update_application_record, delete_application_record,
-    get_files_by_type, # For resume/cover letter selection
-    # add_tag, link_tag_to_application, get_tags_for_application, # For tag management (future)
-    # add_or_update_parsed_metadata, get_parsed_metadata # For metadata (future)
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
+from sqlalchemy.orm import Session
+from core.database.base import get_db
+from core.database import job_tracker_utils as db_utils
+from core.database import models, schemas
+from core.database.crud import (
+    create_file, create_job_posting, create_application,
+    create_status_history, get_application, get_job_posting,
+    get_file_by_hash
 )
-# Ensure core.file_utils functions are correctly imported and used
 from core.file_utils import save_uploaded_file, get_file_hash 
 
 st.set_page_config(layout="wide", page_title="Job Tracker")
 st.title("Job Application Tracker")
+
+# Initialize database session in Streamlit session state
+if 'db' not in st.session_state:
+    try:
+        st.session_state.db = next(get_db())
+    except StopIteration:
+        st.error("Could not connect to database. Please try again.")
+        st.stop()
+
+# Get DB session from state
+db: Session = st.session_state.db
 
 # --- Session State Initialization (Adjust as needed for new schema) ---
 if 'selected_app_id_tracker' not in st.session_state:
@@ -27,19 +35,22 @@ if 'show_add_job_posting_form' not in st.session_state:
     st.session_state.show_add_job_posting_form = False
 
 # --- Function to refresh applications --- 
-def refresh_applications_display_data():
+def refresh_applications_display_data(db: Session) -> pd.DataFrame:
     """Fetches applications with their latest status for display."""
-    apps_data = get_applications_with_latest_status()
+    apps_data = db_utils.get_applications_with_latest_status(db)
     if apps_data:
         df = pd.DataFrame(apps_data)
-        # Rename columns for better display if needed, e.g.:
-        # df.rename(columns={'application_id': 'App ID', 'job_title': 'Job Title'}, inplace=True)
-        # Ensure essential columns exist, even if empty, for consistent display
-        # Example: df['current_status'] = df['current_status'].fillna('N/A')
+        # Fill NA values for better display
+        df['current_status'] = df['current_status'].fillna('No Status')
+        df['status_timestamp'] = df['status_timestamp'].fillna('')
+        df['resume_name'] = df['resume_name'].fillna('No Resume')
+        df['cover_letter_name'] = df['cover_letter_name'].fillna('No Cover Letter')
+        df['submission_method'] = df['submission_method'].fillna('Not Specified')
+        df['job_location'] = df['job_location'].fillna('Not Specified')
         return df
     return pd.DataFrame() # Return empty DataFrame if no data
 
-applications_display_df = refresh_applications_display_data()
+applications_display_df = refresh_applications_display_data(db)
 
 # --- Search and Filter (Adjust for new DataFrame columns) ---
 st.sidebar.header("Filter & Search Applications")
@@ -93,11 +104,8 @@ else:
 
 st.divider()
 
-# --- Manage Selected Application (Placeholder - Needs complete overhaul) ---
+# --- Manage Selected Application ---
 st.header("Manage Application")
-# This section will require significant changes to select an application (e.g., from the table above or a dropdown)
-# and then use get_full_application_details(app_id) to populate forms for editing job posting details,
-# application notes, logging new statuses, linking/unlinking files, managing tags, etc.
 
 if not filtered_display_df.empty:
     app_id_options = filtered_display_df['application_id'].tolist()
@@ -115,7 +123,7 @@ else:
 if selected_app_id_for_management:
     st.subheader(f"Managing Application ID: {selected_app_id_for_management}")
     # Fetch full details for the selected application
-    app_details = get_full_application_details(selected_app_id_for_management)
+    app_details = db_utils.get_full_application_details(db, selected_app_id_for_management)
 
     if app_details:
         # Display Job Posting Details (and allow editing)
@@ -136,28 +144,35 @@ if selected_app_id_for_management:
                 new_date_posted = st.date_input("Date Posted (YYYY-MM-DD)", value=new_date_posted_val)
 
                 if st.form_submit_button("Save Job Posting Changes"):
-                    updated_jp = update_job_posting_details(
-                        job_posting_id=app_details['job_posting_id'],
-                        title=new_title, company=new_company, location=new_location,
-                        description=new_description, source_url=new_source_url, 
-                        date_posted=new_date_posted.isoformat() if new_date_posted else None
-                    )
-                    if updated_jp:
-                        st.success("Job posting details updated!")
-                        st.rerun()
+                    # Update job posting using SQLAlchemy
+                    job_posting = get_job_posting(db, app_details['job_posting_id'])
+                    if job_posting:
+                        job_posting.title = new_title
+                        job_posting.company = new_company
+                        job_posting.location = new_location
+                        job_posting.description = new_description
+                        job_posting.source_url = new_source_url
+                        job_posting.date_posted = new_date_posted.isoformat() if new_date_posted else None
+                        try:
+                            db.commit()
+                            st.success("Job posting details updated!")
+                            st.rerun()
+                        except Exception as e:
+                            db.rollback()
+                            st.error(f"Failed to update job posting details: {str(e)}")
                     else:
-                        st.error("Failed to update job posting details.")
+                        st.error("Job posting not found!")
         
         # Display Application Specific Details (and allow editing)
         with st.expander("Application Details", expanded=True):
             with st.form(key=f"edit_application_record_{selected_app_id_for_management}"):
                 st.write(f"**Application ID:** {selected_app_id_for_management}")
-                submission_options = ['web', 'email', 'referral', 'other', None]
+                submission_options = list(schemas.SubmissionMethod) + [None]
                 current_submission_method = app_details.get('submission_method')
                 try:
                     submission_index = submission_options.index(current_submission_method)
                 except ValueError:
-                    submission_index = submission_options.index(None) # Default to None if not found
+                    submission_index = submission_options.index(None)
 
                 new_submission_method = st.selectbox("Submission Method", 
                                                      options=submission_options,
@@ -169,13 +184,14 @@ if selected_app_id_for_management:
                 current_resume_id = app_details.get('resume_file_id')
                 current_cl_id = app_details.get('cover_letter_file_id')
 
+                # Get available files using SQLAlchemy
                 available_resumes = {0: "None"}
-                for res_file in get_files_by_type('resume'): 
+                for res_file in db_utils.get_files_by_type(db, schemas.FileType.RESUME):
                     available_resumes[res_file['id']] = res_file['original_name']
                 
                 available_cls = {0: "None"}
-                for cl_file_db in get_files_by_type('cover_letter'):
-                    available_cls[cl_file_db['id']] = cl_file_db['original_name']
+                for cl_file in db_utils.get_files_by_type(db, schemas.FileType.COVER_LETTER):
+                    available_cls[cl_file['id']] = cl_file['original_name']
                 
                 resume_keys = list(available_resumes.keys())
                 try:
@@ -197,20 +213,22 @@ if selected_app_id_for_management:
                                                 index=cl_index) 
 
                 if st.form_submit_button("Save Application Changes"):
-                    updated_app_rec = update_application_record(
-                        application_id=selected_app_id_for_management,
-                        resume_file_id=selected_resume_id if selected_resume_id != 0 else None,
-                        cover_letter_file_id=selected_cl_id if selected_cl_id != 0 else None,
-                        submission_method=new_submission_method,
-                        notes=new_app_notes,
-                        update_resume_id=True, 
-                        update_cl_id=True 
-                    )
-                    if updated_app_rec:
-                        st.success("Application details updated!")
-                        st.rerun()
+                    # Update application using SQLAlchemy
+                    application = get_application(db, selected_app_id_for_management)
+                    if application:
+                        application.resume_file_id = selected_resume_id if selected_resume_id != 0 else None
+                        application.cover_letter_file_id = selected_cl_id if selected_cl_id != 0 else None
+                        application.submission_method = new_submission_method
+                        application.notes = new_app_notes
+                        try:
+                            db.commit()
+                            st.success("Application details updated!")
+                            st.rerun()
+                        except Exception as e:
+                            db.rollback()
+                            st.error(f"Failed to update application details: {str(e)}")
                     else:
-                        st.error("Failed to update application details.")
+                        st.error("Application not found!")
 
         # Status History and Logging New Status
         with st.expander("Status History & Logging"): 
@@ -225,19 +243,33 @@ if selected_app_id_for_management:
                 new_status = st.selectbox("New Status", options=['submitted', 'viewed', 'screening', 'interview', 'assessment', 'offer', 'rejected', 'withdrawn', 'other'])
                 new_status_source = st.text_area("Source/Notes for new status (e.g., email content, call summary)", height=75)
                 if st.form_submit_button("Log New Status"):
-                    log_application_status(selected_app_id_for_management, new_status, new_status_source)
-                    st.success(f"Status '{new_status}' logged.")
-                    st.rerun()
+                    if db_utils.log_application_status(
+                        db,
+                        application_id=selected_app_id_for_management,
+                        status=new_status,
+                        source_text=new_status_source
+                    ):
+                        st.success(f"Status '{new_status}' logged.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to log status.")
         
         # Delete Application Button
         if st.button("Delete This Entire Application Record", type="primary", key=f"delete_app_rec_{selected_app_id_for_management}"):
-            if delete_application_record(selected_app_id_for_management):
-                st.success(f"Application record {selected_app_id_for_management} and its related history/contacts/emails deleted.")
-                st.session_state.selected_app_id_tracker = None # Clear selection
-                st.rerun()
+            # Get application instance
+            application = get_application(db, selected_app_id_for_management)
+            if application:
+                try:
+                    db.delete(application)  # This will cascade delete related records
+                    db.commit()
+                    st.success(f"Application record {selected_app_id_for_management} and its related history/contacts/emails deleted.")
+                    st.session_state.selected_app_id_tracker = None
+                    st.rerun()
+                except Exception as e:
+                    db.rollback()
+                    st.error(f"Failed to delete application record: {str(e)}")
             else:
-                st.error(f"Failed to delete application record {selected_app_id_for_management}.")
-
+                st.error(f"Application not found.")
     else:
         st.error(f"Could not retrieve details for Application ID {selected_app_id_for_management}.")
 else:
@@ -245,7 +277,7 @@ else:
 
 st.divider()
 
-# --- Add New Job Posting & Initial Application (Simplified) ---
+# --- Add New Job Posting & Initial Application ---
 st.header("Add New Job Posting & Application")
 
 if st.button("Show Add Job Posting Form", key="toggle_add_jp_form"):
@@ -262,15 +294,18 @@ if st.session_state.get("show_add_job_posting_form", False):
         jp_date_posted = st.date_input("Date Posted (if known)", value=None)
         
         st.subheader("2. Initial Application Details")
-        app_submission_method = st.selectbox("Submission Method", options=['web', 'email', 'referral', 'other', None], index=0)
+        app_submission_method = st.selectbox("Submission Method", 
+                                             options=list(schemas.SubmissionMethod) + [None], index=0)
         app_notes = st.text_area("Initial Application Notes", height=75)
         app_date_submitted = st.date_input("Submission Date", value=datetime.now().date())
         
         uploaded_resume = st.file_uploader("Upload Resume (Optional)", type=["pdf", "docx", "txt"])
         uploaded_cl = st.file_uploader("Upload Cover Letter (Optional)", type=["pdf", "docx", "txt"])
 
-        initial_status = st.selectbox("Initial Status", options=['submitted', 'draft', 'planned'], index=0)
-        initial_status_source = st.text_input("Source for initial status (e.g., 'Manual Entry')", value="Manual Entry")
+        initial_status = st.selectbox("Initial Status", 
+                                      options=['submitted', 'draft', 'planned'], index=0)
+        initial_status_source = st.text_input("Source for initial status (e.g., 'Manual Entry')", 
+                                              value="Manual Entry")
 
         submitted_add_form = st.form_submit_button("Add Job Posting and Application")
 
@@ -278,29 +313,38 @@ if st.session_state.get("show_add_job_posting_form", False):
             if not jp_title or not jp_company or not jp_description:
                 st.error("Job Title, Company, and Description are required for the job posting.")
             else:
-                # 1. Add Job Posting
-                job_posting_id = add_job_posting(
-                    title=jp_title, company=jp_company, description=jp_description,
-                    location=jp_location, source_url=jp_source_url,
-                    date_posted=jp_date_posted.isoformat() if jp_date_posted else None,
+                # 1. Add Job Posting using SQLAlchemy
+                job_posting = db_utils.add_job_posting_with_details(
+                    db, 
+                    title=jp_title, 
+                    company=jp_company, 
+                    description=jp_description,
+                    location=jp_location, 
+                    source_url=jp_source_url,
+                    date_posted=jp_date_posted.isoformat() if jp_date_posted else None
                 )
-                if job_posting_id:
-                    st.success(f"Job Posting '{jp_title}' added with ID: {job_posting_id}")
+                
+                if job_posting:
+                    st.success(f"Job Posting '{jp_title}' added with ID: {job_posting.id}")
+                    resume_file = None
+                    cover_letter_file = None
                     
-                    resume_file_id_db = None
-                    if uploaded_resume is not None:
-                        # Use file_utils to save the file and get its hash
+                    # Process resume if uploaded
+                    if uploaded_resume:
                         saved_resume_path = save_uploaded_file(uploaded_resume)
                         if saved_resume_path:
                             resume_hash = get_file_hash(saved_resume_path)
                             if resume_hash:
-                                resume_file_id_db = add_file(
-                                    original_name=uploaded_resume.name,
-                                    file_path=saved_resume_path,
-                                    file_hash=resume_hash,
-                                    file_type='resume'
+                                resume_file = create_file(
+                                    db,
+                                    schemas.FileCreate(
+                                        original_name=uploaded_resume.name,
+                                        stored_path=str(saved_resume_path),
+                                        sha256=resume_hash,
+                                        file_type=schemas.FileType.RESUME
+                                    )
                                 )
-                                if resume_file_id_db:
+                                if resume_file:
                                     st.info(f"Resume '{uploaded_resume.name}' processed and added to DB.")
                                 else:
                                     st.warning(f"Resume '{uploaded_resume.name}' saved but failed to add to DB.")
@@ -309,19 +353,22 @@ if st.session_state.get("show_add_job_posting_form", False):
                         else:
                             st.warning(f"Could not save uploaded resume: {uploaded_resume.name}")
 
-                    cover_letter_file_id_db = None
-                    if uploaded_cl is not None:
+                    # Process cover letter if uploaded
+                    if uploaded_cl:
                         saved_cl_path = save_uploaded_file(uploaded_cl)
                         if saved_cl_path:
                             cl_hash = get_file_hash(saved_cl_path)
                             if cl_hash:
-                                cover_letter_file_id_db = add_file(
-                                    original_name=uploaded_cl.name,
-                                    file_path=saved_cl_path,
-                                    file_hash=cl_hash,
-                                    file_type='cover_letter'
+                                cover_letter_file = create_file(
+                                    db,
+                                    schemas.FileCreate(
+                                        original_name=uploaded_cl.name,
+                                        stored_path=str(saved_cl_path),
+                                        sha256=cl_hash,
+                                        file_type=schemas.FileType.COVER_LETTER
+                                    )
                                 )
-                                if cover_letter_file_id_db:
+                                if cover_letter_file:
                                     st.info(f"Cover Letter '{uploaded_cl.name}' processed and added to DB.")
                                 else:
                                     st.warning(f"Cover Letter '{uploaded_cl.name}' saved but failed to add to DB.")
@@ -330,22 +377,32 @@ if st.session_state.get("show_add_job_posting_form", False):
                         else:
                             st.warning(f"Could not save uploaded cover letter: {uploaded_cl.name}")
                     
-                    # 2. Add Application record
-                    application_id = add_application(
-                        job_posting_id=job_posting_id,
-                        resume_file_id=resume_file_id_db,
-                        cover_letter_file_id=cover_letter_file_id_db,
+                    # 2. Add Application record using SQLAlchemy
+                    application = db_utils.add_application_with_details(
+                        db,
+                        job_posting_id=job_posting.id,
+                        resume_file_id=resume_file.id if resume_file else None,
+                        cover_letter_file_id=cover_letter_file.id if cover_letter_file else None,
                         submission_method=app_submission_method,
                         notes=app_notes,
-                        date_submitted=app_date_submitted.isoformat() 
+                        date_submitted=app_date_submitted.isoformat()
                     )
-                    if application_id:
-                        st.success(f"Application record created with ID: {application_id}")
+                    
+                    if application:
+                        st.success(f"Application record created with ID: {application.id}")
                         # 3. Log initial status
-                        log_application_status(application_id, initial_status, initial_status_source)
-                        st.info(f"Initial status '{initial_status}' logged.")
-                        st.session_state.show_add_job_posting_form = False
-                        st.rerun()
+                        status_entry = db_utils.log_application_status(
+                            db,
+                            application_id=application.id,
+                            status=initial_status,
+                            source_text=initial_status_source
+                        )
+                        if status_entry:
+                            st.info(f"Initial status '{initial_status}' logged.")
+                            st.session_state.show_add_job_posting_form = False
+                            st.rerun()
+                        else:
+                            st.error("Failed to log initial status.")
                     else:
                         st.error("Failed to create application record.")
                 else:
@@ -353,5 +410,4 @@ if st.session_state.get("show_add_job_posting_form", False):
 else:
     st.caption("Click the button above to open the form for adding a new job posting and its initial application.")
 
-# Placeholder for other functionalities like managing contacts, emails, metadata, tags for a selected application.
-# These would typically be part of the "Manage Application" section when an application is selected.
+st.divider()
