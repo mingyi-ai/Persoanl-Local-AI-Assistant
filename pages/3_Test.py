@@ -1,159 +1,59 @@
 import streamlit as st
-from abc import ABC, abstractmethod
-from typing import List, Dict, Optional, Literal
-from pathlib import Path
 import logging
-import subprocess
-import json
-from llama_cpp import Llama
-import requests
+from typing import List, Dict, Optional, Literal
+from core.LLM_backends import (
+    LLMBackend, LlamaCppBackend, OllamaBackend, 
+    LangChainBackend, get_ollama_models
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Constants
-MODELS_DIR = Path("core/model")
-DEFAULT_MODEL = "Qwen3-8B-Q4_K_M.gguf"
-OLLAMA_BASE_URL = "http://localhost:11434"
+class JobAnalyzer:
+    def __init__(self, langchain_backend: LangChainBackend):
+        self.langchain_backend = langchain_backend
 
-# Helper function to get available Ollama models
-def get_ollama_models():
-    try:
-        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags")
-        if response.status_code == 200:
-            models = response.json().get('models', [])
-            return [model['name'] for model in models]
-        return []
-    except requests.RequestException:
-        return []
+    def render(self):
+        st.header("🎯 Job Description Analyzer")
+        
+        # Text area for job description
+        job_description = st.text_area(
+            "Paste job description here",
+            height=200,
+            key="job_description_input"
+        )
 
-# Abstract base class for LLM backends
-class LLMBackend(ABC):
-    @abstractmethod
-    def initialize_model(self) -> bool:
-        """Initialize the model. Return True if successful."""
-        pass
+        if st.button("Analyze", key="analyze_button"):
+            if not job_description:
+                st.warning("Please paste a job description first.")
+                return
 
-    @abstractmethod
-    def generate_response(self, messages: List[Dict[str, str]], **kwargs) -> Optional[str]:
-        """Generate a response from the model given a list of messages."""
-        pass
-
-    @abstractmethod
-    def get_model_info(self) -> Dict[str, str]:
-        """Get information about the currently loaded model."""
-        pass
-
-class LlamaCppBackend(LLMBackend):
-    def __init__(self, model_path: str = str(MODELS_DIR / DEFAULT_MODEL)):
-        self.model_path = model_path
-        logger.info(f"Initializing LlamaCpp backend with model: {model_path}")
-        # Move model to session state
-        if "llm_model" not in st.session_state:
-            st.session_state.llm_model = None
-
-    def initialize_model(self) -> bool:
-        try:
-            logger.info("Loading model...")
-            # Initialize model in session state if not already loaded
-            if st.session_state.llm_model is None:
-                st.session_state.llm_model = Llama(
-                    model_path=self.model_path,
-                    n_gpu_layers=-1,  # Use all GPU layers
-                    n_ctx=2048,      # Context size
-                    verbose=True     # Enable verbose logging
-                )
-            logger.info("Model loaded successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
-            return False
-
-    def generate_response(self, messages: List[Dict[str, str]], **kwargs) -> Optional[str]:
-        if st.session_state.llm_model is None:
-            logger.error("Model not initialized")
-            return None
-
-        try:
-            logger.info("Generating response...")
-            response = st.session_state.llm_model.create_chat_completion(
-                messages=messages,
-                max_tokens=kwargs.get('max_tokens', 100),
-                temperature=kwargs.get('temperature', 0.7),
-                top_p=kwargs.get('top_p', 0.95)
-            )
-            
-            if response and 'choices' in response and response['choices']:
-                return response['choices'][0]['message']['content'].strip()
-            return None
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return None
-
-    def get_model_info(self) -> Dict[str, str]:
-        return {
-            "backend": "llama.cpp",
-            "model_path": self.model_path,
-            "status": "loaded" if st.session_state.get("llm_model") is not None else "not loaded"
-        }
-
-class OllamaBackend(LLMBackend):
-    def __init__(self, model_name: str = ""):
-        self.model_name = model_name
-        logger.info(f"Initializing Ollama backend with model: {model_name}")
-
-    def initialize_model(self) -> bool:
-        try:
-            # Test connection to Ollama
-            response = requests.get(f"{OLLAMA_BASE_URL}/api/tags")
-            if response.status_code == 200:
-                # Check if selected model exists
-                models = [model['name'] for model in response.json().get('models', [])]
-                if self.model_name in models:
-                    logger.info("Ollama model verified successfully")
-                    return True
+            with st.spinner("Analyzing job description..."):
+                result = self.langchain_backend.analyze_job_description(job_description)
+                
+                if result:
+                    # Display results in a structured way
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Basic Information")
+                        st.write(f"**Title:** {result.title}")
+                        st.write(f"**Job Type:** {result.job_type}")
+                        st.write(f"**Experience:** {result.experience_level}")
+                        st.write(f"**Education:** {result.education}")
+                    
+                    with col2:
+                        st.subheader("Skills")
+                        st.write("**Required Skills:**")
+                        for skill in result.required_skills:
+                            st.markdown(f"- {skill}")
+                        
+                        st.write("**Preferred Skills:**")
+                        for skill in result.preferred_skills:
+                            st.markdown(f"- {skill}")
                 else:
-                    logger.error(f"Model {self.model_name} not found in Ollama")
-                    return False
-            return False
-        except requests.RequestException as e:
-            logger.error(f"Error connecting to Ollama: {e}")
-            return False
-
-    def generate_response(self, messages: List[Dict[str, str]], **kwargs) -> Optional[str]:
-        if not self.model_name:
-            logger.error("No model selected")
-            return None
-
-        try:
-            logger.info("Generating response with Ollama...")
-            response = requests.post(
-                f"{OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": self.model_name,
-                    "messages": messages,
-                    "options": {
-                        "temperature": kwargs.get('temperature', 0.7),
-                        "top_p": kwargs.get('top_p', 0.95)
-                    },
-                    "stream": False
-                }
-            )
-            
-            if response.status_code == 200:
-                return response.json()['message']['content'].strip()
-            return None
-        except Exception as e:
-            logger.error(f"Error generating response with Ollama: {e}")
-            return None
-
-    def get_model_info(self) -> Dict[str, str]:
-        return {
-            "backend": "ollama",
-            "model": self.model_name,
-            "status": "connected" if self.initialize_model() else "not connected"
-        }
+                    st.error("Failed to analyze job description. Please try again.")
 
 class ChatInterface:
     def __init__(self, backend: LLMBackend):
@@ -168,9 +68,9 @@ class ChatInterface:
             st.session_state.dev_mode = False
 
     def render(self):
-        st.title("🤖 LLM Test Interface")
+        st.header("💬 Chat Interface")
         
-        # Sidebar for model information and controls
+        # Sidebar controls
         with st.sidebar:
             st.subheader("Model Information")
             model_info = self.backend.get_model_info()
@@ -196,53 +96,64 @@ class ChatInterface:
                 temperature = 0.7
                 top_p = 0.95
                 max_tokens = 512
+            
+            # Clear chat button
+            if st.button("Clear Chat", key="clear_chat_btn"):
+                st.session_state.messages = []
+                st.rerun()
 
-        # Chat interface
-        st.subheader("Chat")
+        # Create a fixed height container for the chat interface
+        chat_container = st.container()
         
-        # Display chat messages
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
-
-        # Chat input
-        model_ready = isinstance(self.backend, (OllamaBackend, LlamaCppBackend)) and self.backend.initialize_model()
-        if not model_ready:
-            st.error("Failed to initialize model. Please check logs.")
-            return
+        with chat_container:
+            # Chat messages area with fixed height
+            st.markdown('<div style="height: 400px; overflow-y: auto;">', unsafe_allow_html=True)
             
-        if prompt := st.chat_input("Type your message here..."):
-            # Add user message to chat history
-            user_msg = {"role": "user", "content": prompt}
-            st.session_state.messages.append(user_msg)
+            # Display chat messages
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]):
+                    st.write(msg["content"])
             
-            # Display user message
-            with st.chat_message("user"):
-                st.write(prompt)
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            # Generate and display assistant response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = self.backend.generate_response(
-                        st.session_state.messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                        max_tokens=max_tokens
-                    )
-                    if response:
-                        st.write(response)
-                        # Add assistant message to chat history
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": response
-                        })
-                    else:
-                        st.error("Failed to generate response. Please try again.")
-
-        # Clear chat button
-        if st.sidebar.button("Clear Chat", key="clear_chat_btn"):
-            st.session_state.messages = []
-            st.rerun()
+            # Chat input area
+            input_container = st.container()
+            
+            with input_container:
+                # Check model status
+                model_ready = isinstance(self.backend, (OllamaBackend, LlamaCppBackend)) and self.backend.initialize_model()
+                if not model_ready:
+                    st.error("Failed to initialize model. Please check logs.")
+                    return
+                
+                # Chat input
+                if prompt := st.chat_input("Type your message here..."):
+                    # Add user message to chat history
+                    user_msg = {"role": "user", "content": prompt}
+                    st.session_state.messages.append(user_msg)
+                    
+                    # Display user message
+                    with st.chat_message("user"):
+                        st.write(prompt)
+                    
+                    # Generate and display assistant response
+                    with st.chat_message("assistant"):
+                        with st.spinner("Thinking..."):
+                            response = self.backend.generate_response(
+                                st.session_state.messages,
+                                temperature=temperature,
+                                top_p=top_p,
+                                max_tokens=max_tokens
+                            )
+                            if response:
+                                st.write(response)
+                                # Add assistant message to chat history
+                                st.session_state.messages.append({
+                                    "role": "assistant",
+                                    "content": response
+                                })
+                            else:
+                                st.error("Failed to generate response. Please try again.")
 
 # Main execution
 def main():
@@ -319,7 +230,20 @@ def main():
     # Store the current backend in session state
     st.session_state.current_backend = llm_backend
     
-    # Initialize chat interface
+    # Initialize LangChain backend wrapper
+    langchain_backend = LangChainBackend(llm_backend)
+    
+    # Page title
+    st.title("🤖 AI Assistant Test Interface")
+    
+    # Initialize and render job analyzer
+    job_analyzer = JobAnalyzer(langchain_backend)
+    job_analyzer.render()
+    
+    # Add some spacing
+    st.markdown("---")
+    
+    # Initialize and render chat interface
     chat_interface = ChatInterface(llm_backend)
     chat_interface.render()
 

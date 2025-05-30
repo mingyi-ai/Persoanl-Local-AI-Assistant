@@ -7,10 +7,10 @@ __pycache__/
 data/
 
 # Test files
-test/
+tests/
 
 # model files
-core/model/
+core/models/
 
 # Virtual environments
 venv/
