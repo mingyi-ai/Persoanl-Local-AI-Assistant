@@ -1,4 +1,4 @@
-from pydantic import BaseModel, constr
+from pydantic import BaseModel, constr, Field
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -67,8 +67,14 @@ class EmailBase(BaseModel):
 
 class ParsedMetadataBase(BaseModel):
     job_posting_id: int
-    tags: Optional[str] = None
-    tech_stacks: Optional[str] = None
+    tags: Optional[str] = Field(
+        None,
+        description="JSON string containing a list of relevant tags and skills"
+    )
+    tech_stacks: Optional[str] = Field(
+        None,
+        description="JSON string containing a list of technologies used"
+    )
     seniority: Optional[str] = None
     industry: Optional[str] = None
 

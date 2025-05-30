@@ -14,12 +14,20 @@ logger = logging.getLogger(__name__)
 
 # Pydantic models for structured output
 class JobRequirements(BaseModel):
-    title: str = Field(description="The job title")
-    required_skills: List[str] = Field(description="List of required technical skills")
-    preferred_skills: List[str] = Field(description="List of preferred or optional skills")
+    title: str = Field(description="The exact job title from the posting")
+    company: str = Field(description="The company name", default="Not specified")
+    location: str = Field(description="The job location, including if remote", default="Not specified")
+    required_skills: List[str] = Field(description="List of required technical skills, technologies, and competencies")
+    preferred_skills: List[str] = Field(description="List of preferred/nice-to-have skills and qualifications")
     experience_level: str = Field(description="Required years of experience or level (e.g., Entry, Mid, Senior)")
-    education: str = Field(description="Required education level")
-    job_type: str = Field(description="Type of job (e.g., Full-time, Contract, Remote)")
+    education: str = Field(description="Required education level and field of study")
+    job_type: str = Field(description="Employment type (e.g., Full-time, Contract, Part-time, Remote)")
+    compensation: str = Field(description="Salary range and benefits information", default="Not specified")
+    responsibilities: List[str] = Field(description="Key job responsibilities and duties", default_factory=list)
+    requirements: List[str] = Field(description="General job requirements beyond skills", default_factory=list)
+    benefits: List[str] = Field(description="List of benefits and perks", default_factory=list)
+    department: str = Field(description="Department or team within the company", default="Not specified")
+    level: str = Field(description="Job level or seniority (e.g., Junior, Senior, Lead, Manager)", default="Not specified")
 
 class LangChainBackend:
     """Wrapper for LangChain functionality over existing backends"""
@@ -54,20 +62,41 @@ class LangChainBackend:
 
         parser = PydanticOutputParser(pydantic_object=JobRequirements)
         prompt = PromptTemplate(
-            template="""Analyze the following job description and extract key information in a structured format. Make sure to include all required fields: title, required_skills, preferred_skills, experience_level, education, and job_type.
+            template="""Analyze the following job description and extract key information in a structured format. Follow these guidelines:
 
-            If certain information is not explicitly mentioned in the job description:
-            - For experience_level: Use "Not specified" if not mentioned
-            - For education: Use "Not specified" if not mentioned
-            - For job_type: Use "Not specified" if not mentioned
-            
+            1. Required Fields (must be filled):
+              - title: Extract the exact job title
+              - required_skills: List all explicitly required technical skills, tools, and technologies
+              - preferred_skills: List any skills marked as "preferred", "nice-to-have", or "plus"
+              - experience_level: Years of experience or level requirement
+              - education: Required education level and field
+
+            2. Additional Fields (use "Not specified" if not found):
+              - company: Extract company name if present
+              - location: Include full location details, note if remote/hybrid
+              - job_type: Specify employment type (Full-time, Contract, etc.)
+              - compensation: Extract any salary ranges and compensation details
+              - level: Job level/seniority (e.g., Junior, Senior, Lead)
+              - department: Department or team name
+              
+            3. Detailed Sections (leave as empty lists if not found):
+              - responsibilities: Key duties and responsibilities
+              - requirements: Non-skill requirements (e.g., clearances, certifications)
+              - benefits: Company benefits and perks
+              
             Job Description:
             {description}
             
             {format_instructions}
             
-            Remember to include ALL fields in your response, using "Not specified" for missing information.
-            The response must be valid JSON and include all required fields.
+            Instructions:
+            1. Extract information EXACTLY as written in the job posting
+            2. Do not make assumptions or add information not in the text
+            3. Use "Not specified" for missing optional fields
+            4. Use empty lists [] for missing list fields
+            5. All skills should be specific (e.g., "Python", "React", not "programming")
+            6. Keep lists concise - use key phrases, not full sentences
+            7. The response must be valid JSON and include all fields
 
             /no_think
             """,
