@@ -2,11 +2,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import hashlib
-import logging
 from typing import Optional, List, Dict, Any
 from . import models, schemas
-
-logger = logging.getLogger(__name__)
 
 def init_db(db: Session) -> None:
     """Initialize the database by creating all tables and any initial data."""
@@ -56,8 +53,6 @@ def get_job_posting_by_hash(db: Session, desc_hash: str) -> Optional[models.JobP
 
 def create_job_posting(db: Session, job_posting: schemas.JobPostingCreate) -> models.JobPosting:
     """Create a new job posting or return existing one if hash matches."""
-    logger.debug(f"CRUD: Creating job posting - Title: {job_posting.title}, Company: {job_posting.company}")
-    
     desc_hash = generate_description_hash(
         job_posting.title,
         job_posting.company,
@@ -66,20 +61,13 @@ def create_job_posting(db: Session, job_posting: schemas.JobPostingCreate) -> mo
     
     existing = get_job_posting_by_hash(db, desc_hash)
     if existing:
-        logger.debug(f"CRUD: Found existing job posting with hash: {desc_hash}")
         return existing
     
-    try:
-        db_job_posting = models.JobPosting(**job_posting.dict(), description_hash=desc_hash)
-        db.add(db_job_posting)
-        db.commit()
-        db.refresh(db_job_posting)
-        logger.debug(f"CRUD: Successfully created job posting with ID: {db_job_posting.id}")
-        return db_job_posting
-    except Exception as e:
-        logger.error(f"CRUD: Error creating job posting: {e}")
-        db.rollback()
-        raise
+    db_job_posting = models.JobPosting(**job_posting.dict(), description_hash=desc_hash)
+    db.add(db_job_posting)
+    db.commit()
+    db.refresh(db_job_posting)
+    return db_job_posting
 
 # Application operations
 def create_application(db: Session, application: schemas.ApplicationCreate) -> models.Application:
@@ -164,9 +152,6 @@ def update_or_create_parsed_metadata(
     parsed_metadata: Dict[str, Any]
 ) -> Optional[models.ParsedMetadata]:
     """Update existing or create new parsed metadata for a job posting."""
-    logger.debug(f"CRUD: Adding/updating parsed metadata for job posting ID: {job_posting_id}")
-    logger.debug(f"CRUD: Raw metadata: {parsed_metadata}")
-    
     # Try to find existing metadata
     existing = db.query(models.ParsedMetadata).filter(
         models.ParsedMetadata.job_posting_id == job_posting_id
@@ -185,23 +170,14 @@ def update_or_create_parsed_metadata(
         "industry": parsed_metadata.get("industry", "Not specified")
     }
     
-    logger.debug(f"CRUD: Processed metadata dict: {metadata_dict}")
+    if existing:
+        for key, value in metadata_dict.items():
+            setattr(existing, key, value)
+        db.commit()
+        db.refresh(existing)
+        return existing
     
-    try:
-        if existing:
-            logger.debug("CRUD: Updating existing metadata")
-            for key, value in metadata_dict.items():
-                setattr(existing, key, value)
-            db.commit()
-            db.refresh(existing)
-            return existing
-        
-        logger.debug("CRUD: Creating new metadata")
-        return create_parsed_metadata(db, schemas.ParsedMetadataCreate(**metadata_dict))
-    except Exception as e:
-        logger.error(f"CRUD: Error updating/creating metadata: {e}")
-        db.rollback()
-        raise
+    return create_parsed_metadata(db, schemas.ParsedMetadataCreate(**metadata_dict))
 
 # Tag operations
 def create_tag(db: Session, tag: schemas.TagCreate) -> models.Tag:

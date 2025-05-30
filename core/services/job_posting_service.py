@@ -1,11 +1,8 @@
 """Service layer for job posting operations."""
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
-import logging
 
 from ..database import models, schemas, crud
-
-logger = logging.getLogger(__name__)
 
 class JobPostingService:
     @staticmethod
@@ -21,8 +18,6 @@ class JobPostingService:
         parsed_metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[models.JobPosting]:
         """Add a new job posting with the given details."""
-        logger.debug(f"Service: Creating job posting - Title: {title}, Company: {company}")
-        
         job_posting = crud.create_job_posting(
             db,
             schemas.JobPostingCreate(
@@ -37,13 +32,7 @@ class JobPostingService:
         )
         
         if job_posting and parsed_metadata:
-            logger.debug(f"Service: Adding parsed metadata for job posting ID: {job_posting.id}")
-            logger.debug(f"Service: Metadata content: {parsed_metadata}")
             crud.update_or_create_parsed_metadata(db, job_posting.id, parsed_metadata)
-        elif not job_posting:
-            logger.error("Service: Failed to create job posting")
-        else:
-            logger.debug("Service: Created job posting without metadata")
                 
         return job_posting
 

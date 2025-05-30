@@ -2,7 +2,6 @@
 import streamlit as st
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
-import logging
 
 from core.database.base import get_db
 from core.controllers.job_posting_controller import JobPostingController
@@ -11,10 +10,6 @@ from core.ui.forms import JobPostingForm, ApplicationForm
 from core.ui.base import show_validation_errors, show_operation_result
 from core.LLM_backends import LLMBackend, LlamaCppBackend, OllamaBackend, get_ollama_models
 from core.langchain_tools import LangChainBackend
-
-# Configure logging
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
 st.set_page_config(layout="wide", page_title="AI Assistant")
 st.title("AI Job Description Assistant")
@@ -132,22 +127,17 @@ def render_job_posting_form():
             if show_validation_errors(jp_errors):
                 return
 
-            logger.debug(f"Creating job posting with data: {job_posting_data}")
-            logger.debug(f"Parsed metadata: {st.session_state.analysis_result.get('parsed_metadata')}")
-
             # Create job posting with parsed metadata
             jp_result = job_posting_controller.create_job_posting(
                 db=db,
                 title=job_posting_data["title"],
-                company=job_posting_data.get("company", ""),
+                company=job_posting_data.get("company", ""),  # Add company name manually
                 description=job_posting_data["description"],
                 location=job_posting_data.get("location", ""),
                 source_url=job_posting_data.get("source_url", ""),
                 date_posted=job_posting_data["date_posted"].isoformat() if job_posting_data.get("date_posted") else None,
                 parsed_metadata=st.session_state.analysis_result.get("parsed_metadata")
             )
-            
-            logger.debug(f"Job posting creation result: {jp_result}")
             
             if show_operation_result(jp_result, "Job posting created successfully!"):
                 st.success("You can now find this job posting in the Job Tracker to create an application.")
