@@ -64,15 +64,41 @@ def render_job_description_analyzer():
 
                 # Update the parsed data to include only fields accepted by job_posting_controller
                 if result:
+                    # Create comprehensive prefill data with validation-friendly structure
                     st.session_state.analysis_result = {
                         "title": result.title,
+                        "company": getattr(result, 'company', ''),  # Add company if available
                         "description": job_description,
+                        "location": getattr(result, 'location', ''),  # Add location if available
                         "parsed_metadata": {
                             "required_skills": result.required_skills,
                             "preferred_skills": result.preferred_skills
                         }
                     }
-                    st.success("Analysis complete! You can now create a job posting.")
+                    
+                    # Display analysis preview
+                    st.divider()
+                    st.subheader("📋 Analysis Preview")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("**Basic Information**")
+                        st.write(f"**Title:** {result.title}")
+                        if hasattr(result, 'company') and result.company:
+                            st.write(f"**Company:** {result.company}")
+                        if hasattr(result, 'location') and result.location:
+                            st.write(f"**Location:** {result.location}")
+                    
+                    with col2:
+                        st.write("**Skills Analysis**")
+                        if result.required_skills:
+                            st.write("**Required Skills:**")
+                            for skill in result.required_skills[:3]:  # Show first 3
+                                st.write(f"• {skill}")
+                            if len(result.required_skills) > 3:
+                                st.write(f"• ... and {len(result.required_skills) - 3} more")
+                    
+                    st.success("✅ Analysis complete! Scroll down to create a job posting with this data.")
                 else:
                     st.error("Failed to analyze job description. Please try again.")
 

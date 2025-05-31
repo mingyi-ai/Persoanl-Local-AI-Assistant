@@ -107,6 +107,29 @@ def render_add_job_posting_section(
         return show_operation_result(status_result, "Initial status logged successfully")
 
     if st.session_state.get("show_add_job_posting_form", False):
+        # Show AI parsing status if prefill data is available
+        if prefill_data:
+            with st.container():
+                st.success("🤖 AI Analysis Complete - Review and edit the prefilled data below")
+                
+                # Show parsed metadata summary if available
+                if "parsed_metadata" in prefill_data:
+                    with st.expander("📊 AI-Parsed Metadata Summary", expanded=False):
+                        metadata = prefill_data["parsed_metadata"]
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if "required_skills" in metadata and metadata["required_skills"]:
+                                st.write("**Required Skills:**")
+                                for skill in metadata["required_skills"]:
+                                    st.write(f"• {skill}")
+                        
+                        with col2:
+                            if "preferred_skills" in metadata and metadata["preferred_skills"]:
+                                st.write("**Preferred Skills:**")
+                                for skill in metadata["preferred_skills"]:
+                                    st.write(f"• {skill}")
+        
         with st.form("add_job_posting_form", clear_on_submit=True):
             st.subheader("1. Job Posting Details")
             job_posting_data = JobPostingForm.render("new_jp", prefill_data=prefill_data)
@@ -117,7 +140,7 @@ def render_add_job_posting_section(
             st.subheader("3. Initial Status")
             status_data = ApplicationStatusForm.render(
                 "initial",
-                prefill_data={"source_text": "Manual Entry"}
+                prefill_data={"source_text": "AI-Assisted Entry" if prefill_data else "Manual Entry"}
             )
             
             submitted_add_form = st.form_submit_button("Add Job Posting and Application")
@@ -127,7 +150,10 @@ def render_add_job_posting_section(
                     st.session_state.show_add_job_posting_form = False
                     st.rerun()
     else:
-        st.caption("Click the button above to show the form for adding a new job posting and application.")
+        if prefill_data:
+            st.info("🤖 AI analysis completed! Click the button above to review and create a job posting with the parsed data.")
+        else:
+            st.caption("Click the button above to show the form for adding a new job posting and application.")
 
 def render_application_management_section(
     db: Session,
