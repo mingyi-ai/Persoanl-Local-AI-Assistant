@@ -16,7 +16,8 @@ from core.file_utils import save_uploaded_file, get_file_hash
 def render_add_job_posting_section(
     db: Session,
     job_posting_controller,
-    application_controller
+    application_controller,
+    prefill_data: Optional[Dict[str, Any]] = None
 ) -> None:
     """Render the section for adding a new job posting and application."""
     st.header("Add New Job Posting & Application")
@@ -108,8 +109,8 @@ def render_add_job_posting_section(
     if st.session_state.get("show_add_job_posting_form", False):
         with st.form("add_job_posting_form", clear_on_submit=True):
             st.subheader("1. Job Posting Details")
-            job_posting_data = JobPostingForm.render("new_jp")
-            
+            job_posting_data = JobPostingForm.render("new_jp", prefill_data=prefill_data)
+
             st.subheader("2. Initial Application Details")
             application_data = ApplicationForm.render("new_app")
             

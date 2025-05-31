@@ -3,7 +3,7 @@ from typing import Optional, List
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_community.llms import LlamaCpp as LangChainLlama
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -49,9 +49,9 @@ class LangChainBackend:
                 verbose=True,
             )
         elif isinstance(self.base_backend, OllamaBackend):
-            self.langchain_llm = Ollama(
+            self.langchain_llm = OllamaLLM(
                 model=self.base_backend.model_name,
-                callback_manager=callback_manager,
+                callbacks=[StreamingStdOutCallbackHandler()],
             )
 
     def analyze_job_description(self, description: str) -> Optional[JobRequirements]:

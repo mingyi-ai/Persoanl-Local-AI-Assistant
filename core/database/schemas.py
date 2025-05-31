@@ -111,7 +111,7 @@ class File(FileBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class JobPosting(JobPostingBase):
     id: int
@@ -120,7 +120,7 @@ class JobPosting(JobPostingBase):
     parsed_metadata: Optional['ParsedMetadata'] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Application(ApplicationBase):
     id: int
@@ -131,38 +131,38 @@ class Application(ApplicationBase):
     tags: List['Tag'] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class StatusHistory(StatusHistoryBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Contact(ContactBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Email(EmailBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ParsedMetadata(ParsedMetadataBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Tag(TagBase):
     id: int
     applications: List[Application] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Update forward references
 JobPosting.update_forward_refs()
