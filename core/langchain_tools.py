@@ -12,22 +12,28 @@ from .LLM_backends import LLMBackend, LlamaCppBackend, OllamaBackend
 
 logger = logging.getLogger(__name__)
 
+# Import form classes to get field definitions
+try:
+    from .ui.forms import JobPostingForm, ApplicationForm, ApplicationStatusForm
+except ImportError:
+    # Fallback if forms aren't available
+    JobPostingForm = None
+    ApplicationForm = None
+    ApplicationStatusForm = None
+
 # Pydantic models for structured output
 class JobRequirements(BaseModel):
     title: str = Field(description="The exact job title from the posting")
     company: str = Field(description="The company name", default="Not specified")
     location: str = Field(description="The job location, including if remote", default="Not specified")
-    required_skills: List[str] = Field(description="List of required technical skills, technologies, and competencies")
-    preferred_skills: List[str] = Field(description="List of preferred/nice-to-have skills and qualifications")
-    experience_level: str = Field(description="Required years of experience or level (e.g., Entry, Mid, Senior)")
-    education: str = Field(description="Required education level and field of study")
-    job_type: str = Field(description="Employment type (e.g., Full-time, Contract, Part-time, Remote)")
-    compensation: str = Field(description="Salary range and benefits information", default="Not specified")
-    responsibilities: List[str] = Field(description="Key job responsibilities and duties", default_factory=list)
-    requirements: List[str] = Field(description="General job requirements beyond skills", default_factory=list)
-    benefits: List[str] = Field(description="List of benefits and perks", default_factory=list)
-    department: str = Field(description="Department or team within the company", default="Not specified")
-    level: str = Field(description="Job level or seniority (e.g., Junior, Senior, Lead, Manager)", default="Not specified")
+    description: str = Field(description="The full job description text")
+    source_url: str = Field(description="URL where the job posting was found", default="")
+    type: str = Field(description="Job type (Full-time, Part-time, Contract, etc.)", default="Full-time")
+    seniority: str = Field(description="Seniority level (Entry, Mid-Senior, Director, etc.)", default="Mid-Senior")
+    tags: str = Field(description="Comma-separated tags for categorization", default="")
+    skills: str = Field(description="Comma-separated technical skills and requirements", default="")
+    industry: str = Field(description="Industry or sector", default="")
+    date_posted: str = Field(description="Date when job was posted (YYYY-MM-DD format)", default="")
 
 class LangChainBackend:
     """Wrapper for LangChain functionality over existing backends"""
@@ -54,6 +60,88 @@ class LangChainBackend:
                 callbacks=[StreamingStdOutCallbackHandler()],
             )
 
+    def _generate_analysis_prompt(self) -> str:
+        """Generate a dynamic prompt based on available form fields."""
+        if JobPostingForm is None:
+            # Fallback prompt if forms aren't available
+            return self._get_fallback_prompt()
+        
+        job_fields = JobPostingForm.EXPECTED_FIELDS
+        
+        # Map form fields to descriptions
+        field_descriptions = {
+            "title": "Extract the exact job title as written",
+            "company": "Extract company name if present",
+            "location": "Include full location details, note if remote/hybrid/on-site",
+            "description": "Use the full original job description text",
+            "source_url": "Extract any URLs mentioned in the posting",
+            "type": "Job type: Full-time, Part-time, Contract, Temporary, Internship, Freelance, Other",
+            "seniority": "Seniority level: Entry, Mid-Senior, Director, Executive, Intern, Other",
+            "tags": "Generate relevant tags for categorization (comma-separated)",
+            "skills": "Extract all technical skills, tools, and technologies mentioned (comma-separated)",
+            "industry": "Identify the industry or business sector",
+            "date_posted": "Extract posting date if mentioned (use YYYY-MM-DD format)"
+        }
+        
+        # Generate field instructions
+        field_instructions = []
+        required_fields = ["title", "company", "description"]  # Based on JobPostingForm.validate()
+        
+        for field in job_fields:
+            if field in field_descriptions:
+                required_marker = " (REQUIRED)" if field in required_fields else " (Optional)"
+                field_instructions.append(f"  - {field}{required_marker}: {field_descriptions[field]}")
+        
+        prompt = f"""Analyze the following job description and extract key information in a structured JSON format.
+
+        FIELD EXTRACTION GUIDELINES:
+        {chr(10).join(field_instructions)}
+
+        EXTRACTION RULES:
+        1. Extract information EXACTLY as written in the job posting
+        2. Do not make assumptions or add information not in the text
+        3. Use "Not specified" for missing optional string fields
+        4. Use empty strings "" for missing optional fields
+        5. For skills: extract specific technologies, tools, languages (e.g., "Python", "React", "AWS")
+        6. For tags: generate 3-5 relevant categorization tags based on the role and industry
+        7. For type/seniority: choose the closest match from the available options
+        8. Keep extracted text concise but complete
+        9. The response must be valid JSON with all fields included
+
+        Job Description:
+        {{description}}
+
+        {{format_instructions}}
+
+        /no_think
+        """
+        return prompt
+
+    def _get_fallback_prompt(self) -> str:
+        """Fallback prompt when forms are not available."""
+        return """Analyze the following job description and extract key information in a structured format.
+
+        Extract the following fields:
+        - title: The exact job title
+        - company: Company name
+        - location: Job location
+        - description: Full job description
+        - source_url: Any URLs mentioned
+        - type: Employment type (Full-time, Part-time, Contract, etc.)
+        - seniority: Seniority level (Entry, Mid-Senior, Director, etc.)
+        - tags: Relevant tags (comma-separated)
+        - skills: Technical skills (comma-separated)
+        - industry: Industry sector
+        - date_posted: Posting date (YYYY-MM-DD)
+
+        Job Description:
+        {description}
+
+        {format_instructions}
+
+        /no_think
+        """
+
     def analyze_job_description(self, description: str) -> Optional[JobRequirements]:
         """Analyze job description and return structured data"""
         if not self.langchain_llm:
@@ -61,45 +149,12 @@ class LangChainBackend:
             return None
 
         parser = PydanticOutputParser(pydantic_object=JobRequirements)
+        
+        # Generate dynamic prompt based on form fields
+        template = self._generate_analysis_prompt()
+        
         prompt = PromptTemplate(
-            template="""Analyze the following job description and extract key information in a structured format. Follow these guidelines:
-
-            1. Required Fields (must be filled):
-              - title: Extract the exact job title
-              - required_skills: List all explicitly required technical skills, tools, and technologies
-              - preferred_skills: List any skills marked as "preferred", "nice-to-have", or "plus"
-              - experience_level: Years of experience or level requirement
-              - education: Required education level and field
-
-            2. Additional Fields (use "Not specified" if not found):
-              - company: Extract company name if present
-              - location: Include full location details, note if remote/hybrid
-              - job_type: Specify employment type (Full-time, Contract, etc.)
-              - compensation: Extract any salary ranges and compensation details
-              - level: Job level/seniority (e.g., Junior, Senior, Lead)
-              - department: Department or team name
-              
-            3. Detailed Sections (leave as empty lists if not found):
-              - responsibilities: Key duties and responsibilities
-              - requirements: Non-skill requirements (e.g., clearances, certifications)
-              - benefits: Company benefits and perks
-              
-            Job Description:
-            {description}
-            
-            {format_instructions}
-            
-            Instructions:
-            1. Extract information EXACTLY as written in the job posting
-            2. Do not make assumptions or add information not in the text
-            3. Use "Not specified" for missing optional fields
-            4. Use empty lists [] for missing list fields
-            5. All skills should be specific (e.g., "Python", "React", not "programming")
-            6. Keep lists concise - use key phrases, not full sentences
-            7. The response must be valid JSON and include all fields
-
-            /no_think
-            """,
+            template=template,
             input_variables=["description"],
             partial_variables={"format_instructions": parser.get_format_instructions()}
         )

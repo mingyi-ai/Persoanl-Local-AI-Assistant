@@ -97,23 +97,24 @@ def render_add_job_posting_section(
             with st.container():
                 st.success("🤖 AI Analysis Complete - Review and edit the prefilled data below")
                 
-                # Show parsed metadata summary if available
-                if "parsed_metadata" in prefill_data:
-                    with st.expander("📊 AI-Parsed Metadata Summary", expanded=False):
-                        metadata = prefill_data["parsed_metadata"]
+                # Show skills summary if available
+                if "skills" in prefill_data and prefill_data["skills"]:
+                    with st.expander("📊 AI-Parsed Skills Summary", expanded=False):
+                        skills_list = prefill_data["skills"].split(', ') if prefill_data["skills"] else []
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            if "required_skills" in metadata and metadata["required_skills"]:
-                                st.write("**Required Skills:**")
-                                for skill in metadata["required_skills"]:
+                            if skills_list:
+                                st.write("**Skills:**")
+                                for skill in skills_list:
                                     st.write(f"• {skill}")
                         
                         with col2:
-                            if "preferred_skills" in metadata and metadata["preferred_skills"]:
-                                st.write("**Preferred Skills:**")
-                                for skill in metadata["preferred_skills"]:
-                                    st.write(f"• {skill}")
+                            if "tags" in prefill_data and prefill_data["tags"]:
+                                st.write("**Tags:**")
+                                tags_list = prefill_data["tags"].split(', ') if prefill_data["tags"] else []
+                                for tag in tags_list:
+                                    st.write(f"• {tag}")
         
         with st.form("add_job_posting_form", clear_on_submit=True):
             st.subheader("1. Job Posting Details")
@@ -156,28 +157,28 @@ def render_application_management_section(
         st.error(f"Could not retrieve details for Application ID {selected_app_id}")
         return
 
-    # Display Job Posting Details
-    with st.expander("Job Posting Details", expanded=True):
-        # For now, just display job posting details without editing capability
-        # TODO: Add update_job_posting method to controller and enable editing
+    # # Display Job Posting Details
+    # with st.expander("Job Posting Details", expanded=True):
+    #     # For now, just display job posting details without editing capability
+    #     # TODO: Add update_job_posting method to controller and enable editing
         
-        st.write(f"**Job Posting ID:** {app_details['job_posting_id']}")
-        st.write(f"**Title:** {app_details.get('job_title', 'N/A')}")
-        st.write(f"**Company:** {app_details.get('job_company', 'N/A')}")
-        st.write(f"**Location:** {app_details.get('job_location', 'N/A')}")
-        st.write(f"**Type:** {app_details.get('job_type', 'N/A')}")
-        st.write(f"**Seniority:** {app_details.get('job_seniority', 'N/A')}")
-        st.write(f"**Source URL:** {app_details.get('job_source_url', 'N/A')}")
-        st.write(f"**Date Posted:** {app_details.get('job_date_posted', 'N/A')}")
-        st.write(f"**Tags:** {app_details.get('job_tags', 'N/A')}")
-        st.write(f"**Skills:** {app_details.get('job_skills', 'N/A')}")
-        st.write(f"**Industry:** {app_details.get('job_industry', 'N/A')}")
+    #     st.write(f"**Job Posting ID:** {app_details['job_posting_id']}")
+    #     st.write(f"**Title:** {app_details.get('job_title', 'N/A')}")
+    #     st.write(f"**Company:** {app_details.get('job_company', 'N/A')}")
+    #     st.write(f"**Location:** {app_details.get('job_location', 'N/A')}")
+    #     st.write(f"**Type:** {app_details.get('job_type', 'N/A')}")
+    #     st.write(f"**Seniority:** {app_details.get('job_seniority', 'N/A')}")
+    #     st.write(f"**Source URL:** {app_details.get('job_source_url', 'N/A')}")
+    #     st.write(f"**Date Posted:** {app_details.get('job_date_posted', 'N/A')}")
+    #     st.write(f"**Tags:** {app_details.get('job_tags', 'N/A')}")
+    #     st.write(f"**Skills:** {app_details.get('job_skills', 'N/A')}")
+    #     st.write(f"**Industry:** {app_details.get('job_industry', 'N/A')}")
         
-        if app_details.get('job_description'):
-            st.write("**Job Description:**")
-            st.text_area("Job Description", value=app_details['job_description'], height=200, disabled=True, key=f"job_desc_{selected_app_id}", label_visibility="collapsed")
+    #     if app_details.get('job_description'):
+    #         st.write("**Job Description:**")
+    #         st.text_area("Job Description", value=app_details['job_description'], height=200, disabled=True, key=f"job_desc_{selected_app_id}", label_visibility="collapsed")
         
-        st.info("💡 Job posting editing will be available in a future update.")
+    #     st.info("💡 Job posting editing will be available in a future update.")
     
     # Display Application Details
     with st.expander("Application Details", expanded=True):
@@ -245,23 +246,23 @@ def render_application_management_section(
                     st.rerun()
 
     # Status History and Logging
-    with st.expander("Status History & Logging"):
-        st.write("**Current Status History:**")
-        display_status_history(app_details.get('status_history', []))
+    # with st.expander("Status History & Logging"):
+    #     st.write("**Current Status History:**")
+    #     display_status_history(app_details.get('status_history', []))
         
-        with st.form(key=f"log_status_{selected_app_id}"):
-            status_data = ApplicationStatusForm.render("new_status")
+    #     with st.form(key=f"log_status_{selected_app_id}"):
+    #         status_data = ApplicationStatusForm.render("new_status")
             
-            if st.form_submit_button("Log New Status"):
-                result = application_controller.update_application_status(
-                    db=db,
-                    application_id=selected_app_id,
-                    status=status_data["status"],
-                    source_text=status_data["source_text"]
-                )
-                show_operation_result(result, f"Status '{status_data['status']}' logged.")
-                if result["success"]:
-                    st.rerun()
+    #         if st.form_submit_button("Log New Status"):
+    #             result = application_controller.update_application_status(
+    #                 db=db,
+    #                 application_id=selected_app_id,
+    #                 status=status_data["status"],
+    #                 source_text=status_data["source_text"]
+    #             )
+    #             show_operation_result(result, f"Status '{status_data['status']}' logged.")
+    #             if result["success"]:
+    #                 st.rerun()
 
 def filter_applications(df: pd.DataFrame, search_term: str = None, status_filter: str = None) -> pd.DataFrame:
     """Filter applications based on search term and status."""

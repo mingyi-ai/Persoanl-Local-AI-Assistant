@@ -44,19 +44,25 @@ class JobAnalyzer:
                     with col1:
                         st.subheader("Basic Information")
                         st.write(f"**Title:** {result.title}")
-                        st.write(f"**Job Type:** {result.job_type}")
-                        st.write(f"**Experience:** {result.experience_level}")
-                        st.write(f"**Education:** {result.education}")
+                        st.write(f"**Company:** {getattr(result, 'company', 'Not specified')}")
+                        st.write(f"**Location:** {getattr(result, 'location', 'Not specified')}")
+                        st.write(f"**Job Type:** {getattr(result, 'type', 'Not specified')}")
+                        st.write(f"**Seniority:** {getattr(result, 'seniority', 'Not specified')}")
+                        st.write(f"**Industry:** {getattr(result, 'industry', 'Not specified')}")
                     
                     with col2:
-                        st.subheader("Skills")
-                        st.write("**Required Skills:**")
-                        for skill in result.required_skills:
-                            st.markdown(f"- {skill}")
+                        st.subheader("Skills & Tags")
+                        if result.skills:
+                            st.write("**Skills:**")
+                            skills_list = result.skills.split(', ')
+                            for skill in skills_list:
+                                st.markdown(f"- {skill}")
                         
-                        st.write("**Preferred Skills:**")
-                        for skill in result.preferred_skills:
-                            st.markdown(f"- {skill}")
+                        if getattr(result, 'tags', ''):
+                            st.write("**Tags:**")
+                            tags_list = result.tags.split(', ')
+                            for tag in tags_list:
+                                st.markdown(f"- {tag}")
                 else:
                     st.error("Failed to analyze job description. Please try again.")
 

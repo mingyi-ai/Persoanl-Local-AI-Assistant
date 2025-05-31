@@ -30,9 +30,12 @@ class BaseForm:
         warnings = {}
         if not prefill_data:
             return warnings
+        
+        # Known legacy fields that can be safely ignored
+        legacy_fields = {'parsed_metadata', 'id', 'created_at', 'updated_at'}
             
         for field, value in prefill_data.items():
-            if field not in expected_fields:
+            if field not in expected_fields and field not in legacy_fields:
                 warnings[field] = f"Unexpected field '{field}' in prefill data"
             elif value is None:
                 warnings[field] = f"Field '{field}' has null value in prefill data"

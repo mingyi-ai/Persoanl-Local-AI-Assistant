@@ -69,13 +69,16 @@ def render_job_description_analyzer():
                     # Create comprehensive prefill data with validation-friendly structure
                     st.session_state.analysis_result = {
                         "title": result.title,
-                        "company": getattr(result, 'company', ''),  # Add company if available
+                        "company": getattr(result, 'company', ''),
                         "description": job_description,
-                        "location": getattr(result, 'location', ''),  # Add location if available
-                        "parsed_metadata": {
-                            "required_skills": result.required_skills,
-                            "preferred_skills": result.preferred_skills
-                        }
+                        "location": getattr(result, 'location', ''),
+                        "source_url": getattr(result, 'source_url', ''),
+                        "type": getattr(result, 'type', ''),
+                        "seniority": getattr(result, 'seniority', ''),
+                        "tags": getattr(result, 'tags', ''),
+                        "skills": getattr(result, 'skills', ''),
+                        "industry": getattr(result, 'industry', ''),
+                        "date_posted": getattr(result, 'date_posted', '')
                     }
                     
                     # Display analysis preview
@@ -93,12 +96,13 @@ def render_job_description_analyzer():
                     
                     with col2:
                         st.write("**Skills Analysis**")
-                        if result.required_skills:
-                            st.write("**Required Skills:**")
-                            for skill in result.required_skills[:3]:  # Show first 3
+                        if result.skills:
+                            st.write("**Skills:**")
+                            skills_list = result.skills.split(', ')
+                            for skill in skills_list[:3]:  # Show first 3
                                 st.write(f"• {skill}")
-                            if len(result.required_skills) > 3:
-                                st.write(f"• ... and {len(result.required_skills) - 3} more")
+                            if len(skills_list) > 3:
+                                st.write(f"• ... and {len(skills_list) - 3} more")
                     
                     st.success("✅ Analysis complete! Scroll down to create a job posting with this data.")
                 else:

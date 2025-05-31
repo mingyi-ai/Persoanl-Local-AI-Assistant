@@ -66,10 +66,13 @@ def render_ai_job_description_analyzer(langchain_backend) -> None:
                         "company": getattr(result, 'company', ''),
                         "description": job_description,
                         "location": getattr(result, 'location', ''),
-                        "parsed_metadata": {
-                            "required_skills": result.required_skills,
-                            "preferred_skills": result.preferred_skills
-                        }
+                        "source_url": getattr(result, 'source_url', ''),
+                        "type": getattr(result, 'type', ''),
+                        "seniority": getattr(result, 'seniority', ''),
+                        "tags": getattr(result, 'tags', ''),
+                        "skills": getattr(result, 'skills', ''),
+                        "industry": getattr(result, 'industry', ''),
+                        "date_posted": getattr(result, 'date_posted', '')
                     }
                     
                     # Display analysis preview
@@ -87,12 +90,13 @@ def render_ai_job_description_analyzer(langchain_backend) -> None:
                     
                     with col2:
                         st.write("**Skills Analysis**")
-                        if result.required_skills:
-                            st.write("**Required Skills:**")
-                            for skill in result.required_skills[:3]:  # Show first 3
+                        if result.skills:
+                            st.write("**Skills:**")
+                            skills_list = result.skills.split(', ')
+                            for skill in skills_list[:3]:  # Show first 3
                                 st.write(f"• {skill}")
-                            if len(result.required_skills) > 3:
-                                st.write(f"• ... and {len(result.required_skills) - 3} more")
+                            if len(skills_list) > 3:
+                                st.write(f"• ... and {len(skills_list) - 3} more")
                     
                     st.success("✅ Analysis complete! Use the 'Add New Job Posting' tab below to create an entry with this data.")
                 else:
@@ -193,23 +197,23 @@ def render_add_job_posting_tab(
     if prefill_data:
         st.success("🤖 AI Analysis Complete - Review and edit the prefilled data below")
         
-        # Show parsed metadata summary if available
-        if "parsed_metadata" in prefill_data:
-            with st.expander("📊 AI-Parsed Metadata Summary", expanded=False):
-                metadata = prefill_data["parsed_metadata"]
+        # Show skills summary if available
+        if "skills" in prefill_data and prefill_data["skills"]:
+            with st.expander("📊 AI-Parsed Skills Summary", expanded=False):
+                skills_list = prefill_data["skills"].split(', ') if prefill_data["skills"] else []
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if "required_skills" in metadata and metadata["required_skills"]:
-                        st.write("**Required Skills:**")
-                        for skill in metadata["required_skills"]:
-                            st.write(f"• {skill}")
-                
+                    if skills_list:
+                        st.write("**Skills:**")
+                        for skill in skills_list:
+                            st.write(f"• {skill}")                
                 with col2:
-                    if "preferred_skills" in metadata and metadata["preferred_skills"]:
-                        st.write("**Preferred Skills:**")
-                        for skill in metadata["preferred_skills"]:
-                            st.write(f"• {skill}")
+                    if "tags" in prefill_data and prefill_data["tags"]:
+                        st.write("**Tags:**")
+                        tags_list = prefill_data["tags"].split(', ') if prefill_data["tags"] else []
+                        for tag in tags_list:
+                            st.write(f"• {tag}")
 
     with st.form("main_add_job_posting_form", clear_on_submit=True):
         st.markdown("#### 1. Job Posting Details")
