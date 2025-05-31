@@ -42,7 +42,7 @@ class BaseForm:
 class JobPostingForm(BaseForm):
     """Form for job posting details with standardized prefill support."""
     
-    EXPECTED_FIELDS = ["title", "company", "location", "description", "source_url", "date_posted"]
+    EXPECTED_FIELDS = ["title", "company", "location", "type", "seniority", "description", "source_url", "date_posted", "tags", "skills", "industry"]
     
     @classmethod
     def render(cls, key_prefix: str = "", prefill_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -73,6 +73,24 @@ class JobPostingForm(BaseForm):
             value=cls._get_prefill_value(prefill_data, "location"),
             key=f"{key_prefix}_location",
             help="AI-parsed" if prefill_data and "location" in prefill_data else None
+        )
+
+        data["type"] = st.selectbox(
+            "Job Type",
+            options=["Full-time", "Part-time", "Contract", "Temporary", "Internship", "Freelance", "Other"],
+            # options=list(schemas.JobType),  # schemas.JobType to do later
+            index=0,  # Default to first option
+            key=f"{key_prefix}_type",
+            help="AI-suggested" if prefill_data and "type" in prefill_data else None
+        )
+
+        data["seniority"] = st.selectbox(
+            "Seniority Level",
+            # options=list(schemas.SeniorityLevel), # schemas.SeniorityLevel to do later
+            options=["Entry", "Mid-Senior", "Director", "Executive", "Intern", "Other"], 
+            index=0,  # Default to first option
+            key=f"{key_prefix}_seniority",
+            help="AI-suggested" if prefill_data and "seniority" in prefill_data else None
         )
         
         data["description"] = st.text_area(
@@ -112,6 +130,27 @@ class JobPostingForm(BaseForm):
             help="AI-parsed" if prefill_data and "date_posted" in prefill_data else None
         )
 
+        data["tags"] = st.text_input(
+            "Tags (comma-separated, Optional)",
+            value=cls._get_prefill_value(prefill_data, "tags"),
+            key=f"{key_prefix}_tags",
+            help="AI-suggested" if prefill_data and "tags" in prefill_data else None
+        )
+
+        data["skills"] = st.text_input(
+            "Skills (comma-separated, Optional)",
+            value=cls._get_prefill_value(prefill_data, "skills"),
+            key=f"{key_prefix}_skills",
+            help="AI-suggested" if prefill_data and "skills" in prefill_data else None
+        )
+
+        data["industry"] = st.text_input(
+            "Industry (Optional)",
+            value=cls._get_prefill_value(prefill_data, "industry"),
+            key=f"{key_prefix}_industry",
+            help="AI-suggested" if prefill_data and "industry" in prefill_data else None
+        )
+
         return data
 
     @classmethod
@@ -123,7 +162,7 @@ class JobPostingForm(BaseForm):
 class ApplicationForm(BaseForm):
     """Form for application details with standardized prefill support."""
     
-    EXPECTED_FIELDS = ["submission_method", "notes", "date_submitted"]
+    EXPECTED_FIELDS = ["submission_method", "date_submitted", "cover_letter_text", "additional_questions", "notes"]
     
     @classmethod
     def render(cls, key_prefix: str = "", prefill_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -151,15 +190,7 @@ class ApplicationForm(BaseForm):
             key=f"{key_prefix}_submission_method",
             help="AI-suggested" if prefill_data and "submission_method" in prefill_data else None
         )
-        
-        data["notes"] = st.text_area(
-            "Application Notes",
-            value=cls._get_prefill_value(prefill_data, "notes"),
-            height=75,
-            key=f"{key_prefix}_notes",
-            help="AI-generated" if prefill_data and "notes" in prefill_data else None
-        )
-        
+
         # Handle date with prefill
         prefill_date = cls._get_prefill_value(prefill_data, "date_submitted")
         date_value = datetime.now().date()
@@ -189,11 +220,36 @@ class ApplicationForm(BaseForm):
             key=f"{key_prefix}_resume"
         )
         
-        data["cover_letter"] = st.file_uploader(
-            "Upload Cover Letter (Optional)",
-            type=["pdf", "docx", "txt"],
-            key=f"{key_prefix}_cover_letter"
+        data["cover_letter_text"] = st.text_area(
+            "Cover Letter (Optional)",
+            value=cls._get_prefill_value(prefill_data, "cover_letter"),
+            height=150,
+            key=f"{key_prefix}_cover_letter_text",
+            help="Paste your cover letter here or upload a file below"
         )
+
+        data["cover_letter_file"] = st.file_uploader(
+            "Upload Cover Letter File (Optional)",
+            type=["pdf", "docx", "txt"],
+            key=f"{key_prefix}_cover_letter_file"
+        )
+
+        data["additional_questions"] = st.text_area(
+            "Additional Questions (JSON format, Optional)",
+            value=cls._get_prefill_value(prefill_data, "additional_questions"),
+            height=75,
+            key=f"{key_prefix}_additional_questions",
+            help="AI-generated" if prefill_data and "additional_questions" in prefill_data else None
+        )
+        
+        data["notes"] = st.text_area(
+            "Notes (Optional)",
+            value=cls._get_prefill_value(prefill_data, "notes"),
+            height=75,
+            key=f"{key_prefix}_notes",
+            help="AI-generated" if prefill_data and "notes" in prefill_data else None
+        )
+    
 
         return data
 
