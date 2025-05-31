@@ -10,6 +10,11 @@ from core.langchain_tools import LangChainBackend
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+st.set_page_config(layout="wide", page_title="Testing Interface")
+st.title("🧪 Testing Interface")
+
+st.info("💡 **Note:** This page is for testing AI models and functionality. The main application is on the home page.")
+
 class JobAnalyzer:
     def __init__(self, langchain_backend: LangChainBackend):
         self.langchain_backend = langchain_backend

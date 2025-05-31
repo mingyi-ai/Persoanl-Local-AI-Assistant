@@ -1,4 +1,3 @@
-# filepath: /Users/mingyihou/Desktop/JobAssistant/core/database/schemas.py
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -60,7 +59,6 @@ class JobPosting(JobPostingBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    applications: List['Application'] = []
 
     class Config:
         from_attributes = True
@@ -83,8 +81,6 @@ class Application(ApplicationBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    job_posting: Optional[JobPosting] = None
-    status_history: List['ApplicationStatusRecord'] = []
 
     class Config:
         from_attributes = True
@@ -105,7 +101,121 @@ class ApplicationStatusRecord(ApplicationStatusBase):
     class Config:
         from_attributes = True
 
+class ContactBase(BaseModel):
+    application_id: int
+    name: str
+    role: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    first_reached: Optional[str] = None
+    last_contacted: Optional[str] = None
+
+class EmailBase(BaseModel):
+    application_id: int
+    direction: EmailDirection
+    timestamp: str
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+class ParsedMetadataBase(BaseModel):
+    job_posting_id: int
+    tags: Optional[str] = Field(
+        None,
+        description="JSON string containing a list of relevant tags and skills"
+    )
+    tech_stacks: Optional[str] = Field(
+        None,
+        description="JSON string containing a list of technologies used"
+    )
+    seniority: Optional[str] = None
+    industry: Optional[str] = None
+
+class TagBase(BaseModel):
+    name: str
+
+# Create schemas
+class FileCreate(FileBase):
+    pass
+
+class JobPostingCreate(JobPostingBase):
+    pass
+
+class ApplicationCreate(ApplicationBase):
+    pass
+
+class StatusHistoryCreate(StatusHistoryBase):
+    pass
+
+class ContactCreate(ContactBase):
+    pass
+
+class EmailCreate(EmailBase):
+    pass
+
+class ParsedMetadataCreate(ParsedMetadataBase):
+    pass
+
+class TagCreate(TagBase):
+    pass
+
+# Read schemas (including IDs)
+class File(FileBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class JobPosting(JobPostingBase):
+    id: int
+    description_hash: str
+    applications: List['Application'] = []
+    parsed_metadata: Optional['ParsedMetadata'] = None
+
+    class Config:
+        from_attributes = True
+
+class Application(ApplicationBase):
+    id: int
+    job_posting: JobPosting
+    status_history: List['StatusHistory'] = []
+    contacts: List['Contact'] = []
+    emails: List['Email'] = []
+    tags: List['Tag'] = []
+
+    class Config:
+        from_attributes = True
+
+class StatusHistory(StatusHistoryBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class Contact(ContactBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class Email(EmailBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class ParsedMetadata(ParsedMetadataBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class Tag(TagBase):
+    id: int
+    applications: List[Application] = []
+
+    class Config:
+        from_attributes = True
+
 # Update forward references
-JobPosting.model_rebuild()
-Application.model_rebuild()
-ApplicationStatusRecord.model_rebuild()
+JobPosting.update_forward_refs()
+Application.update_forward_refs()

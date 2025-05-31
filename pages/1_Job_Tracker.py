@@ -14,8 +14,10 @@ from core.ui.job_tracker_ui import (
     filter_applications
 )
 
-st.set_page_config(layout="wide", page_title="Job Tracker")
-st.title("Job Application Tracker")
+st.set_page_config(layout="wide", page_title="Job Tracker - Legacy")
+st.title("📋 Job Application Tracker (Legacy Interface)")
+
+st.info("💡 **Note:** The main functionality has been moved to the home page. This page is kept for testing and legacy access.")
 
 # Initialize database session and controllers in Streamlit session state
 if 'db' not in st.session_state:
@@ -44,11 +46,25 @@ def refresh_applications_display_data(db: Session) -> pd.DataFrame:
     result = application_controller.get_application_list(db)
     if result["success"] and result["applications"]:
         df = pd.DataFrame(result["applications"])
+        
+        # Transform file paths to display names for better UX
+        def extract_filename(file_path):
+            if not file_path:
+                return None
+            import os
+            return os.path.basename(file_path)
+        
+        # Create display names from file paths
+        df['resume_name'] = df['resume_file_path'].apply(extract_filename).fillna('No Resume')
+        df['cover_letter_name'] = df['cover_letter_file_path'].apply(extract_filename).fillna('No Cover Letter')
+        
+        # Rename date_submitted to match expected display column name
+        if 'date_submitted' in df.columns:
+            df['job_date_submitted'] = df['date_submitted']
+        
         # Fill NA values for better display
         df['current_status'] = df['current_status'].fillna('No Status')
         df['status_timestamp'] = df['status_timestamp'].fillna('')
-        df['resume_name'] = df['resume_name'].fillna('No Resume')
-        df['cover_letter_name'] = df['cover_letter_name'].fillna('No Cover Letter')
         df['submission_method'] = df['submission_method'].fillna('Not Specified')
         df['job_location'] = df['job_location'].fillna('Not Specified')
         return df
@@ -124,3 +140,5 @@ st.divider()
 render_add_job_posting_section(db, job_posting_controller, application_controller)
 
 st.divider()
+
+st.caption("💡 This legacy interface will be maintained for testing. Use the main page for the improved experience.")

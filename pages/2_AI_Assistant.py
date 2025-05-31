@@ -1,4 +1,4 @@
-# AI Assistant Page
+# AI Assistant Page - Legacy Interface
 import streamlit as st
 from sqlalchemy.orm import Session
 from core.database.base import get_db
@@ -8,8 +8,10 @@ from core.ui.job_tracker_ui import render_add_job_posting_section
 from core.langchain_tools import LangChainBackend
 from core.LLM_backends import get_ollama_models, OllamaBackend, LlamaCppBackend
 
-st.set_page_config(layout="wide", page_title="AI Assistant")
-st.title("AI Job Description Assistant")
+st.set_page_config(layout="wide", page_title="AI Assistant - Legacy")
+st.title("🤖 AI Job Description Assistant (Legacy Interface)")
+
+st.info("💡 **Note:** The main AI functionality has been moved to the home page. This page is kept for testing and legacy access.")
 
 # Initialize database session and controllers in Streamlit session state
 if 'db' not in st.session_state:
@@ -111,3 +113,6 @@ render_add_job_posting_section(
     application_controller=application_controller,
     prefill_data=st.session_state.get("analysis_result", {})
 )
+
+st.divider()
+st.caption("💡 This legacy interface will be maintained for testing. Use the main page for the improved experience.")

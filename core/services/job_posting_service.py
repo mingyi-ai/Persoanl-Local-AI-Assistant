@@ -1,5 +1,5 @@
 """Service layer for job posting operations."""
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 
 from ..database import models, schemas, crud
@@ -12,10 +12,13 @@ class JobPostingService:
         company: str, 
         description: str,
         location: Optional[str] = None,
+        job_type: Optional[str] = None,
+        seniority: Optional[str] = None,
         source_url: Optional[str] = None,
         date_posted: Optional[str] = None,
-        questions_answered: Optional[str] = None,
-        parsed_metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[str] = None,
+        skills: Optional[str] = None,
+        industry: Optional[str] = None,
     ) -> Optional[models.JobPosting]:
         """Add a new job posting with the given details."""
         job_posting = crud.create_job_posting(
@@ -25,18 +28,70 @@ class JobPostingService:
                 company=company,
                 description=description,
                 location=location,
+                type=job_type,
+                seniority=seniority,
                 source_url=source_url,
                 date_posted=date_posted,
-                questions_answered=questions_answered
+                tags=tags,
+                skills=skills,
+                industry=industry
             )
         )
-        
-        if job_posting and parsed_metadata:
-            crud.update_or_create_parsed_metadata(db, job_posting.id, parsed_metadata)
-                
         return job_posting
 
     @staticmethod
-    def generate_description_hash(title: str, company: str, description: str) -> str:
-        """Generate a hash for the job posting details."""
-        return crud.generate_description_hash(title, company, description)
+    def get_job_posting_by_id(db: Session, job_posting_id: int) -> Optional[models.JobPosting]:
+        """Get a job posting by its ID."""
+        return crud.get_job_posting(db, job_posting_id)
+
+    @staticmethod
+    def search_job_postings(
+        db: Session, 
+        search_term: str = "", 
+        company: str = "", 
+        skip: int = 0, 
+        limit: int = 100
+    ) -> List[models.JobPosting]:
+        """Search job postings by various criteria."""
+        return crud.search_job_postings(db, search_term, company, skip, limit)
+
+    @staticmethod
+    def get_all_job_postings(db: Session, skip: int = 0, limit: int = 100) -> List[models.JobPosting]:
+        """Get all job postings with pagination."""
+        return crud.get_job_postings(db, skip, limit)
+    
+    @staticmethod
+    def update_job_posting_with_details(
+        db: Session,
+        job_posting_id: int,
+        title: str,
+        company: str, 
+        description: str,
+        location: Optional[str] = None,
+        job_type: Optional[str] = None,
+        seniority: Optional[str] = None,
+        source_url: Optional[str] = None,
+        date_posted: Optional[str] = None,
+        tags: Optional[str] = None,
+        skills: Optional[str] = None,
+        industry: Optional[str] = None,
+    ) -> Optional[models.JobPosting]:
+        """Update a job posting with the given details."""
+        job_posting = crud.update_job_posting(
+            db,
+            job_posting_id,
+            schemas.JobPostingCreate(
+                title=title,
+                company=company,
+                description=description,
+                location=location,
+                type=job_type,
+                seniority=seniority,
+                source_url=source_url,
+                date_posted=date_posted,
+                tags=tags,
+                skills=skills,
+                industry=industry
+            )
+        )
+        return job_posting

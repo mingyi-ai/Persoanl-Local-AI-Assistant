@@ -11,11 +11,13 @@ class ApplicationService:
     def add_application_with_details(
         db: Session,
         job_posting_id: int,
-        resume_file_id: Optional[int] = None,
-        cover_letter_file_id: Optional[int] = None,
         submission_method: Optional[str] = None,
-        notes: Optional[str] = None,
         date_submitted: Optional[str] = None,
+        resume_file_path: Optional[str] = None,
+        cover_letter_file_path: Optional[str] = None,
+        cover_letter_text: Optional[str] = None,
+        additional_questions: Optional[str] = None,
+        notes: Optional[str] = None,
     ) -> Optional[models.Application]:
         """Add a new application with the given details."""
         # Create application
@@ -23,20 +25,16 @@ class ApplicationService:
             db,
             schemas.ApplicationCreate(
                 job_posting_id=job_posting_id,
-                resume_file_id=resume_file_id,
-                cover_letter_file_id=cover_letter_file_id,
                 submission_method=submission_method,
+                date_submitted=date_submitted,
+                resume_file_path=resume_file_path,
+                cover_letter_file_path=cover_letter_file_path,
+                cover_letter_text=cover_letter_text,
+                additional_questions=additional_questions,
                 notes=notes
             )
         )
         
-        # Update job posting with submission date
-        if application and date_submitted:
-            job_posting = crud.get_job_posting(db, job_posting_id)
-            if job_posting:
-                job_posting.date_submitted = date_submitted
-                db.commit()
-                
         return application
 
     @staticmethod
@@ -47,35 +45,93 @@ class ApplicationService:
             db.query(models.Application)
             .options(
                 joinedload(models.Application.job_posting),
-                joinedload(models.Application.status_history),
-                joinedload(models.Application.resume_file),
-                joinedload(models.Application.cover_letter_file)
+                joinedload(models.Application.status_history)
+            )
+            .all()
+        )
+        
+        result = []
+        for app in applications:
+            # Get latest status
+            latest_status = None
+            if app.status_history:
+                latest_status = max(app.status_history, key=lambda s: s.created_at)
+            
+            result.append({
+                'application': app,
+                'job_posting': app.job_posting,
+                'latest_status': latest_status.status if latest_status else 'unknown',
+                'status_date': latest_status.created_at if latest_status else app.created_at
+            })
+        
+        return result
+
+    @staticmethod
+    def add_status_update(
+        db: Session,
+        application_id: int,
+        status: str,
+        source_text: Optional[str] = None
+    ) -> Optional[models.ApplicationStatus]:
+        """Add a status update to an application."""
+        return crud.create_application_status(
+            db,
+            schemas.ApplicationStatusCreate(
+                application_id=application_id,
+                status=status,
+                source_text=source_text
+            )
+        )
+
+    @staticmethod
+    def get_application_by_id(db: Session, application_id: int) -> Optional[models.Application]:
+        """Get an application by its ID."""
+        return crud.get_application(db, application_id)
+
+    @staticmethod
+    def get_applications_by_status(
+        db: Session, 
+        status: str, 
+        skip: int = 0, 
+        limit: int = 100
+    ) -> List[models.Application]:
+        """Get applications filtered by their latest status."""
+        return crud.get_applications_with_status(db, status, skip, limit)
+
+    @staticmethod
+    def get_all_applications_with_details(db: Session) -> List[Dict[str, Any]]:
+        """Get all applications with job posting details and latest status."""
+        applications = (
+            db.query(models.Application)
+            .options(
+                joinedload(models.Application.job_posting),
+                joinedload(models.Application.status_history)
             )
             .all()
         )
 
-        # Format the results
         results = []
         for app in applications:
             # Get latest status
             latest_status = None
             latest_timestamp = None
             if app.status_history:
-                latest_status_record = max(app.status_history, key=lambda x: x.timestamp)
+                latest_status_record = max(app.status_history, key=lambda x: x.created_at)
                 latest_status = latest_status_record.status
-                latest_timestamp = latest_status_record.timestamp
+                latest_timestamp = latest_status_record.created_at
 
             result = {
                 "application_id": app.id,
                 "job_title": app.job_posting.title,
                 "job_company": app.job_posting.company,
                 "job_location": app.job_posting.location,
-                "job_date_submitted": app.job_posting.date_submitted,
-                "resume_name": app.resume_file.original_name if app.resume_file else None,
-                "cover_letter_name": app.cover_letter_file.original_name if app.cover_letter_file else None,
+                "date_submitted": app.date_submitted,
+                "resume_file_path": app.resume_file_path,
+                "cover_letter_file_path": app.cover_letter_file_path,
                 "submission_method": app.submission_method,
                 "current_status": latest_status,
-                "status_timestamp": latest_timestamp
+                "status_timestamp": latest_timestamp,
+                "notes": app.notes
             }
             results.append(result)
 
@@ -88,12 +144,7 @@ class ApplicationService:
             db.query(models.Application)
             .options(
                 joinedload(models.Application.job_posting),
-                joinedload(models.Application.resume_file),
-                joinedload(models.Application.cover_letter_file),
-                joinedload(models.Application.status_history),
-                joinedload(models.Application.contacts),
-                joinedload(models.Application.emails),
-                joinedload(models.Application.tags)
+                joinedload(models.Application.status_history)
             )
             .filter(models.Application.id == application_id)
             .first()
@@ -112,94 +163,69 @@ class ApplicationService:
             "job_description": application.job_posting.description,
             "job_source_url": application.job_posting.source_url,
             "job_date_posted": application.job_posting.date_posted,
-            "job_date_submitted": application.job_posting.date_submitted,
-            "job_questions_answered": application.job_posting.questions_answered,
-            "resume_file_id": application.resume_file_id,
-            "resume_original_name": application.resume_file.original_name if application.resume_file else None,
-            "resume_stored_path": application.resume_file.stored_path if application.resume_file else None,
-            "cover_letter_file_id": application.cover_letter_file_id,
-            "cover_letter_original_name": application.cover_letter_file.original_name if application.cover_letter_file else None,
-            "cover_letter_stored_path": application.cover_letter_file.stored_path if application.cover_letter_file else None,
+            "job_type": application.job_posting.type,
+            "job_seniority": application.job_posting.seniority,
+            "job_tags": application.job_posting.tags,
+            "job_skills": application.job_posting.skills,
+            "job_industry": application.job_posting.industry,
+            "date_submitted": application.date_submitted,
+            "resume_file_path": application.resume_file_path,
+            "cover_letter_file_path": application.cover_letter_file_path,
+            "cover_letter_text": application.cover_letter_text,
             "submission_method": application.submission_method,
-            "application_notes": application.notes,
+            "additional_questions": application.additional_questions,
+            "notes": application.notes,
+            "created_at": application.created_at,
+            "updated_at": application.updated_at
         }
         
         # Add status history
         result["status_history"] = [
             {
-                "timestamp": status.timestamp,
+                "created_at": status.created_at,
                 "status": status.status,
                 "source_text": status.source_text
             }
-            for status in sorted(application.status_history, key=lambda x: x.timestamp)
+            for status in sorted(application.status_history, key=lambda x: x.created_at)
         ]
-        
-        # Add contacts
-        result["contacts"] = [
-            {
-                "name": contact.name,
-                "role": contact.role,
-                "email": contact.email,
-                "phone": contact.phone,
-                "first_reached": contact.first_reached,
-                "last_contacted": contact.last_contacted
-            }
-            for contact in application.contacts
-        ]
-        
-        # Add emails
-        result["emails"] = [
-            {
-                "direction": email.direction,
-                "timestamp": email.timestamp,
-                "subject": email.subject,
-                "body": email.body
-            }
-            for email in sorted(application.emails, key=lambda x: x.timestamp)
-        ]
-        
-        # Add tags
-        result["tags"] = [tag.name for tag in application.tags]
-        
-        # Add parsed metadata if exists
-        if application.job_posting.parsed_metadata:
-            result["parsed_metadata"] = {
-                "tags": application.job_posting.parsed_metadata.tags,
-                "tech_stacks": application.job_posting.parsed_metadata.tech_stacks,
-                "seniority": application.job_posting.parsed_metadata.seniority,
-                "industry": application.job_posting.parsed_metadata.industry
-            }
         
         return result
 
     @staticmethod
-    def log_application_status(
+    def update_application(
         db: Session,
         application_id: int,
-        status: str,
-        source_text: Optional[str] = None,
-        timestamp: Optional[str] = None
-    ) -> Optional[models.ApplicationStatusHistory]:
-        """Log a new status for an application."""
-        if not timestamp:
-            timestamp = datetime.now().isoformat()
-            
-        return crud.create_status_history(
-            db,
-            schemas.StatusHistoryCreate(
-                application_id=application_id,
-                status=status,
-                timestamp=timestamp,
-                source_text=source_text
-            )
-        )
+        **updates
+    ) -> Optional[models.Application]:
+        """Update an application with new details."""
+        return crud.update_application(db, application_id, updates)
 
     @staticmethod
-    def get_files_by_type(db: Session, file_type: str) -> List[Dict[str, Any]]:
-        """Get all files of a specific type."""
-        files = (
-            db.query(models.File)
-            .filter(models.File.file_type == file_type)
-            .all()
-        )
-        return [{"id": f.id, "original_name": f.original_name} for f in files]
+    def delete_application(db: Session, application_id: int) -> bool:
+        """Delete an application and its associated data."""
+        return crud.delete_application(db, application_id)
+
+    @staticmethod
+    def get_applications_summary(db: Session) -> Dict[str, Any]:
+        """Get summary statistics for applications."""
+        total_applications = db.query(models.Application).count()
+        
+        # Get status counts
+        status_counts = {}
+        applications = db.query(models.Application).options(
+            joinedload(models.Application.status_history)
+        ).all()
+        
+        for app in applications:
+            if app.status_history:
+                latest_status = max(app.status_history, key=lambda x: x.created_at)
+                status = latest_status.status
+            else:
+                status = 'unknown'
+            
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        return {
+            "total_applications": total_applications,
+            "status_counts": status_counts
+        }

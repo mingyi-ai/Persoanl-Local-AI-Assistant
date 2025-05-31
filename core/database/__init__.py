@@ -1,13 +1,8 @@
 from .base import Base, engine, SessionLocal, get_db
 from .models import (
     JobPosting,
-    File,
     Application,
-    ApplicationStatusHistory,
-    Contact,
-    Email,
-    ParsedMetadata,
-    Tag,
+    ApplicationStatus,
 )
 
 # Create all tables
@@ -19,11 +14,6 @@ __all__ = [
     'SessionLocal',
     'get_db',
     'JobPosting',
-    'File',
     'Application',
-    'ApplicationStatusHistory',
-    'Contact',
-    'Email',
-    'ParsedMetadata',
-    'Tag',
+    'ApplicationStatus',
 ]

@@ -13,21 +13,25 @@ class ApplicationController:
         self,
         db: Session,
         job_posting_id: int,
-        resume_file_id: Optional[int] = None,
-        cover_letter_file_id: Optional[int] = None,
         submission_method: Optional[str] = None,
-        notes: Optional[str] = None,
         date_submitted: Optional[str] = None,
+        resume_file_path: Optional[str] = None,
+        cover_letter_file_path: Optional[str] = None,
+        cover_letter_text: Optional[str] = None,
+        additional_questions: Optional[str] = None,
+        notes: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new application and return a formatted response."""
         application = self.service.add_application_with_details(
             db=db,
             job_posting_id=job_posting_id,
-            resume_file_id=resume_file_id,
-            cover_letter_file_id=cover_letter_file_id,
             submission_method=submission_method,
-            notes=notes,
-            date_submitted=date_submitted
+            date_submitted=date_submitted,
+            resume_file_path=resume_file_path,
+            cover_letter_file_path=cover_letter_file_path,
+            cover_letter_text=cover_letter_text,
+            additional_questions=additional_questions,
+            notes=notes
         )
 
         if not application:
@@ -41,7 +45,7 @@ class ApplicationController:
 
     def get_application_list(self, db: Session) -> Dict[str, Any]:
         """Get a list of all applications with their latest status."""
-        applications = self.service.get_applications_with_latest_status(db)
+        applications = self.service.get_all_applications_with_details(db)
         return {
             "success": True,
             "applications": applications
@@ -69,14 +73,14 @@ class ApplicationController:
         source_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """Update the status of an application."""
-        status_history = self.service.log_application_status(
+        status_record = self.service.add_status_update(
             db=db,
             application_id=application_id,
             status=status,
             source_text=source_text
         )
 
-        if not status_history:
+        if not status_record:
             return {
                 "success": False,
                 "message": "Failed to update application status"
@@ -87,10 +91,45 @@ class ApplicationController:
             "message": f"Application status updated to {status}"
         }
 
-    def list_files_by_type(self, db: Session, file_type: str) -> Dict[str, Any]:
-        """Get a list of files of a specific type."""
-        files = self.service.get_files_by_type(db, file_type)
+    def update_application(
+        self,
+        db: Session,
+        application_id: int,
+        **updates
+    ) -> Dict[str, Any]:
+        """Update an application with new details."""
+        application = self.service.update_application(db, application_id, **updates)
+        
+        if not application:
+            return {
+                "success": False,
+                "message": f"Failed to update application with ID {application_id}"
+            }
+
         return {
             "success": True,
-            "files": files
+            "message": "Application updated successfully"
+        }
+
+    def delete_application(self, db: Session, application_id: int) -> Dict[str, Any]:
+        """Delete an application."""
+        success = self.service.delete_application(db, application_id)
+        
+        if not success:
+            return {
+                "success": False,
+                "message": f"Failed to delete application with ID {application_id}"
+            }
+
+        return {
+            "success": True,
+            "message": "Application deleted successfully"
+        }
+
+    def get_applications_summary(self, db: Session) -> Dict[str, Any]:
+        """Get summary statistics for applications."""
+        summary = self.service.get_applications_summary(db)
+        return {
+            "success": True,
+            "summary": summary
         }
