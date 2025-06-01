@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from ..database import models, schemas, crud
+from ..database.db_utils import archive_database_file # Added import
+from ..database.base import engine # Added import for init_db
 
 class JobTrackerService:
     # Job Posting Methods
@@ -322,3 +324,36 @@ class JobTrackerService:
             "total_applications": total_applications,
             "status_counts": status_counts
         }
+
+    @staticmethod
+    def reset_database_service(db: Session) -> tuple[bool, str]:
+        """
+        Archives the current database file and initializes a new, empty database.
+        """
+        # Close the current session to release the lock on the database file
+        # This is crucial before trying to move/delete the file.
+        # The calling scope (e.g., controller or UI) should handle getting a new session if needed after reset.
+        db.close() # Close the session passed to this service method.
+
+        archived_ok, archive_message = archive_database_file()
+        if not archived_ok:
+            # If archiving failed, we should not proceed to init a new DB
+            # as the old one might still be in place or in an inconsistent state.
+            # A new session should be established by the caller if they wish to retry or continue.
+            return False, f"Failed to archive database: {archive_message}"
+
+        try:
+            # Re-initialize the database (creates tables)
+            # crud.init_db() expects a session, but it's primarily for Base.metadata.create_all(bind=engine)
+            # We can call create_all directly on the engine.
+            models.Base.metadata.create_all(bind=engine)
+            
+            # At this point, a new DB file (if SQLite) would be created by SQLAlchemy
+            # when a new session is made and it tries to connect.
+            # The create_all ensures tables are there.
+            
+            # The caller will need to create a new session to interact with the new database.
+            return True, f"Database reset successfully. {archive_message}. A new database has been initialized."
+        except Exception as e:
+            # This is a critical failure. The old DB might be archived, but the new one failed to init.
+            return False, f"Database archived, but failed to initialize new database: {e}. Manual check required."

@@ -2,8 +2,8 @@
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 
-from ..services.job_tracker_service import JobTrackerService
-from ..database import models
+from core.services.job_tracker_service import JobTrackerService
+from core.database.base import SessionLocal, get_db  # Added get_db
 
 class JobTrackerController:
     def __init__(self):
@@ -268,10 +268,30 @@ class JobTrackerController:
             "message": "Application deleted successfully"
         }
 
-    def get_applications_summary(self, db: Session) -> Dict[str, Any]:
-        """Get summary statistics for applications."""
-        summary = self.service.get_applications_summary(db)
-        return {
-            "success": True,
-            "summary": summary
-        }
+    def get_applications_summary(self):
+        db = next(get_db())  # Get a new session
+        try:
+            return JobTrackerService.get_applications_summary(db)
+        finally:
+            db.close()
+
+    def reset_database(self):
+        """
+        Controller method to handle resetting the database.
+        It calls the service layer to perform the operation.
+        A new database session is obtained and closed within this method for the reset operation.
+        """
+        # For a destructive operation like reset, it's good to manage the session lifecycle tightly.
+        # Get a new session specifically for this operation.
+        db = SessionLocal() 
+        try:
+            success, message = JobTrackerService.reset_database_service(db)
+            # Note: reset_database_service closes the session it's given.
+            # So, 'db' is closed at this point.
+            return success, message
+        except Exception as e:
+            # If reset_database_service itself throws an unhandled error before closing db,
+            # ensure db is closed.
+            if db.is_active:
+                 db.close()
+            return False, f"An unexpected error occurred in the controller during database reset: {e}"

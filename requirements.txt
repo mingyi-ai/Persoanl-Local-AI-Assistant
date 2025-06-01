@@ -1,43 +1,48 @@
+# JobAssistant - AI-Powered Job Application Tracker
+# Core dependencies for the application
+
+# Web Framework
 streamlit>=1.24.0
-llama-cpp-python>=0.2.11
-langchain>=0.1.0
-langchain-community>=0.0.10
-pydantic>=2.0.0
-requests>=2.31.0
-# 
-# import torch
-# if torch.backends.mps.is_available():
-#     mps_device = torch.device("mps")
-#     x = torch.ones(1, device=mps_device)
-#     print (x)
-# else:
-#     print ("MPS device not found.")
-# The output should show:
-# 
-# tensor([1.], device='mps:0')
-# 
 
-streamlit
-langchain
-langchain-community
-# langchain-ollama # Commented out as we are switching to Hugging Face
-# ollama # Commented out as we are switching to Hugging Face
-pypdf2
-pandas
-transformers
-# torch # PyTorch is a dependency for Transformers - specific installation instructions above
-# Ensure you install PyTorch, torchvision, and torchaudio according to your environment (pip/conda) and needs (stable/nightly)
-# The line below is a general placeholder if you let pip manage it, but for MPS, specific index URLs might be better.
-torch >= 1.12 # Minimum version that generally supports MPS, but latest stable or nightly is better.
-torchvision
-torchaudio
-accelerate # Often needed for optimal performance with Transformers
-# bitsandbytes # Required for 4-bit/8-bit quantization on compatible hardware (mainly CUDA)
-modelscope # For model management and deployment
+# AI and Language Models
+llama-cpp-python>=0.2.11      # Local LLM support via llama.cpp
+langchain>=0.1.0               # LLM abstraction layer
+langchain-community>=0.0.10    # Additional LangChain integrations
 
-# Hugging Face Model Download (GGUF format)
-# https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf?download=true
-#
-sqlalchemy>=2.0.0
-alembic>=1.12.0
+# Database and Data Management
+sqlalchemy>=2.0.0              # Database ORM
+alembic>=1.12.0                # Database migrations
+pandas                         # Data manipulation and analysis
+
+# Data Validation and Processing
+pydantic>=2.0.0                # Data validation and settings
+requests>=2.31.0               # HTTP requests
+pypdf2                         # PDF processing
+
+# Machine Learning and AI
+transformers                   # Hugging Face transformers library
+torch>=1.12                    # PyTorch (MPS support for Apple Silicon)
+torchvision                    # Computer vision models
+torchaudio                     # Audio processing
+accelerate                     # Optimized model training and inference
+
+# Model Management and Deployment
+modelscope                     # Model management and deployment
+
+# Optional: Quantization support (uncomment if needed)
+# bitsandbytes                 # Required for 4-bit/8-bit quantization on CUDA
+
+# Note: For Apple Silicon Macs, install PyTorch with MPS support:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Note: For CUDA-enabled systems, install PyTorch with CUDA support:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Recommended Model Download (GGUF format):
+# wget -O core/models/Qwen3-8B-Q4_K_M.gguf \
+#   "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf"
+
+# Alternative: Use Ollama for easier model management
+# Installation: https://ollama.ai
+# Example: ollama pull qwen2.5:7b
 
