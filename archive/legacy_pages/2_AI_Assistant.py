@@ -2,8 +2,7 @@
 import streamlit as st
 from sqlalchemy.orm import Session
 from core.database.base import get_db
-from core.controllers.job_posting_controller import JobPostingController
-from core.controllers.application_controller import ApplicationController
+from core.controllers.job_tracker_controller import JobTrackerController
 from core.ui.job_tracker_ui import render_add_job_posting_section
 from core.langchain_tools import LangChainBackend
 from core.LLM_backends import get_ollama_models, OllamaBackend, LlamaCppBackend
@@ -17,8 +16,7 @@ st.info("💡 **Note:** The main AI functionality has been moved to the home pag
 if 'db' not in st.session_state:
     try:
         st.session_state.db = next(get_db())
-        st.session_state.job_posting_controller = JobPostingController()
-        st.session_state.application_controller = ApplicationController()
+        st.session_state.job_tracker_controller = JobTrackerController()
     except StopIteration:
         st.error("Could not connect to database. Please try again.")
         st.stop()
@@ -43,8 +41,7 @@ if 'show_add_job_posting_form' not in st.session_state:
 
 # Get instances from session state
 db: Session = st.session_state.db
-job_posting_controller = st.session_state.job_posting_controller
-application_controller = st.session_state.application_controller
+job_tracker_controller = st.session_state.job_tracker_controller
 langchain_backend = st.session_state.langchain_backend
 
 def render_job_description_analyzer():
@@ -113,8 +110,7 @@ render_job_description_analyzer()
 st.divider()
 render_add_job_posting_section(
     db=db,
-    job_posting_controller=job_posting_controller,
-    application_controller=application_controller,
+    job_tracker_controller=job_tracker_controller,
     prefill_data=st.session_state.get("analysis_result", {})
 )
 

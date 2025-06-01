@@ -5,8 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from sqlalchemy.orm import Session
 from core.database.base import get_db
-from core.controllers.job_posting_controller import JobPostingController
-from core.controllers.application_controller import ApplicationController
+from core.controllers.job_tracker_controller import JobTrackerController
 from core.ui.displays import display_applications_table
 from core.ui.job_tracker_ui import (
     render_add_job_posting_section,
@@ -23,16 +22,14 @@ st.info("💡 **Note:** The main functionality has been moved to the home page. 
 if 'db' not in st.session_state:
     try:
         st.session_state.db = next(get_db())
-        st.session_state.job_posting_controller = JobPostingController()
-        st.session_state.application_controller = ApplicationController()
+        st.session_state.job_tracker_controller = JobTrackerController()
     except StopIteration:
         st.error("Could not connect to database. Please try again.")
         st.stop()
 
 # Get DB session and controllers from state
 db: Session = st.session_state.db
-job_posting_controller = st.session_state.job_posting_controller
-application_controller = st.session_state.application_controller
+job_tracker_controller = st.session_state.job_tracker_controller
 
 # --- Session State Initialization ---
 if 'selected_app_id_tracker' not in st.session_state:
@@ -43,7 +40,7 @@ if 'show_add_job_posting_form' not in st.session_state:
 # --- Function to refresh applications --- 
 def refresh_applications_display_data(db: Session) -> pd.DataFrame:
     """Fetches applications with their latest status for display."""
-    result = application_controller.get_application_list(db)
+    result = job_tracker_controller.get_application_list(db)
     if result["success"] and result["applications"]:
         df = pd.DataFrame(result["applications"])
         
@@ -128,8 +125,7 @@ if not filtered_display_df.empty:
         render_application_management_section(
             db,
             selected_app_id_for_management,
-            application_controller,
-            job_posting_controller
+            job_tracker_controller
         )
 else:
     st.caption("No applications to select for management.")
@@ -137,7 +133,7 @@ else:
 st.divider()
 
 # --- Add New Job Posting & Application ---
-render_add_job_posting_section(db, job_posting_controller, application_controller)
+render_add_job_posting_section(db, job_tracker_controller)
 
 st.divider()
 

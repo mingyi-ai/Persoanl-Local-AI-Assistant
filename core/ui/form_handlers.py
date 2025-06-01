@@ -5,7 +5,7 @@ import streamlit as st
 
 from .forms import JobPostingForm, ApplicationForm, ApplicationStatusForm
 from .base import show_validation_errors, show_operation_result
-from ..file_utils import save_uploaded_file
+from ..services.file_service import FileService
 
 
 class BaseFormHandler:
@@ -13,6 +13,7 @@ class BaseFormHandler:
     
     def __init__(self, db: Session):
         self.db = db
+        self.file_service = FileService()
     
     def handle_validation_errors(self, form_class, data: Dict[str, Any]) -> bool:
         """Handle form validation and return True if there are errors (should stop processing)."""
@@ -27,9 +28,9 @@ class BaseFormHandler:
 class JobPostingFormHandler(BaseFormHandler):
     """Handler for job posting form operations."""
     
-    def __init__(self, db: Session, job_posting_controller):
+    def __init__(self, db: Session, job_tracker_controller):
         super().__init__(db)
-        self.job_posting_controller = job_posting_controller
+        self.job_posting_controller = job_tracker_controller
     
     def create_job_posting(self, job_posting_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new job posting from form data."""
@@ -76,9 +77,9 @@ class JobPostingFormHandler(BaseFormHandler):
 class ApplicationFormHandler(BaseFormHandler):
     """Handler for application form operations."""
     
-    def __init__(self, db: Session, application_controller):
+    def __init__(self, db: Session, job_tracker_controller):
         super().__init__(db)
-        self.application_controller = application_controller
+        self.application_controller = job_tracker_controller
     
     def create_application(self, job_posting_id: int, application_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new application from form data."""
@@ -90,10 +91,10 @@ class ApplicationFormHandler(BaseFormHandler):
         cover_letter_file_path = None
         
         if application_data.get("resume"):
-            resume_file_path = save_uploaded_file(application_data["resume"])
+            resume_file_path = self.file_service.save_uploaded_file(application_data["resume"])
         
         if application_data.get("cover_letter_file"):
-            cover_letter_file_path = save_uploaded_file(application_data["cover_letter_file"])
+            cover_letter_file_path = self.file_service.save_uploaded_file(application_data["cover_letter_file"])
         
         return self.application_controller.create_application(
             db=self.db,
@@ -119,10 +120,10 @@ class ApplicationFormHandler(BaseFormHandler):
         cover_letter_file_path = current_cover_letter_path  # Keep existing by default
         
         if new_resume:
-            resume_file_path = save_uploaded_file(new_resume)
+            resume_file_path = self.file_service.save_uploaded_file(new_resume)
         
         if new_cover_letter:
-            cover_letter_file_path = save_uploaded_file(new_cover_letter)
+            cover_letter_file_path = self.file_service.save_uploaded_file(new_cover_letter)
         
         return self.application_controller.update_application(
             db=self.db,
@@ -139,9 +140,9 @@ class ApplicationFormHandler(BaseFormHandler):
 class ApplicationStatusFormHandler(BaseFormHandler):
     """Handler for application status form operations."""
     
-    def __init__(self, db: Session, application_controller):
+    def __init__(self, db: Session, job_tracker_controller):
         super().__init__(db)
-        self.application_controller = application_controller
+        self.application_controller = job_tracker_controller
     
     def update_status(self, application_id: int, status_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update application status from form data."""
@@ -159,11 +160,11 @@ class ApplicationStatusFormHandler(BaseFormHandler):
 class CombinedFormHandler:
     """Handler for combined job posting + application creation workflows."""
     
-    def __init__(self, db: Session, job_posting_controller, application_controller):
+    def __init__(self, db: Session, job_tracker_controller):
         self.db = db
-        self.job_posting_handler = JobPostingFormHandler(db, job_posting_controller)
-        self.application_handler = ApplicationFormHandler(db, application_controller)
-        self.status_handler = ApplicationStatusFormHandler(db, application_controller)
+        self.job_posting_handler = JobPostingFormHandler(db, job_tracker_controller)
+        self.application_handler = ApplicationFormHandler(db, job_tracker_controller)
+        self.status_handler = ApplicationStatusFormHandler(db, job_tracker_controller)
     
     def create_job_posting_and_application(self, 
                                          job_posting_data: Dict[str, Any], 

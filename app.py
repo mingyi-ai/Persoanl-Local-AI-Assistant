@@ -6,10 +6,9 @@ from sqlalchemy.orm import Session
 
 from core.database import Base, engine
 from core.database.base import get_db
-from core.controllers.job_posting_controller import JobPostingController
-from core.controllers.application_controller import ApplicationController
-from core.langchain_tools import LangChainBackend
-from core.LLM_backends import get_ollama_models, OllamaBackend, LlamaCppBackend
+from core.controllers.job_tracker_controller import JobTrackerController
+from core.services.prompt_service import PromptService
+from core.services.llm_service import LLMService, OllamaBackend, LlamaCppBackend
 from core.ui.job_tracker_ui import (
     render_database_display_section,
     render_main_action_tabs
@@ -30,9 +29,8 @@ def initialize_controllers():
     """Initialize controllers and database connection."""
     try:
         db = next(get_db())
-        job_posting_controller = JobPostingController()
-        application_controller = ApplicationController()
-        return db, job_posting_controller, application_controller
+        job_tracker_controller = JobTrackerController()
+        return db, job_tracker_controller
     except StopIteration:
         st.error("Could not connect to database. Please try again.")
         st.stop()
@@ -42,7 +40,7 @@ def initialize_controllers():
 def initialize_ai_backend():
     """Initialize AI backend for job description analysis."""
     with st.spinner("Initializing AI model..."):
-        available_models = get_ollama_models()
+        available_models = LLMService.get_ollama_models()
         if available_models:
             llm_backend = OllamaBackend(available_models[0])
         else:
@@ -52,16 +50,16 @@ def initialize_ai_backend():
             st.error("Failed to initialize AI model. Please check logs.")
             st.stop()
         
-        return LangChainBackend(llm_backend)
+        return PromptService(llm_backend)
 
 # Initialize components
-db, job_posting_controller, application_controller = initialize_controllers()
-langchain_backend = initialize_ai_backend()
+db, job_tracker_controller = initialize_controllers()
+prompt_service = initialize_ai_backend()
 
 # --- Data Fetching Function ---
 def refresh_applications_display_data(db: Session) -> pd.DataFrame:
     """Fetches applications with their latest status for display."""
-    result = application_controller.get_application_list(db)
+    result = job_tracker_controller.get_application_list(db)
     
     if not result.get("success", False):
         return pd.DataFrame()
@@ -118,9 +116,8 @@ st.divider()
 render_main_action_tabs(
     db, 
     applications_display_df,
-    job_posting_controller, 
-    application_controller, 
-    langchain_backend
+    job_tracker_controller, 
+    prompt_service
 )
 
 # --- Footer ---

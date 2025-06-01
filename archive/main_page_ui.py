@@ -107,8 +107,7 @@ def render_ai_job_description_analyzer(langchain_backend) -> None:
 
 def render_add_job_posting_tab(
     db: Session,
-    job_posting_controller,
-    application_controller,
+    job_tracker_controller,
     langchain_backend
 ) -> None:
     """Render the add new job posting tab."""
@@ -161,7 +160,7 @@ def render_add_job_posting_tab(
         
         if submitted_form:
             # Use the centralized form handler
-            combined_handler = CombinedFormHandler(db, job_posting_controller, application_controller)
+            combined_handler = CombinedFormHandler(db, job_tracker_controller)
             success = combined_handler.create_job_posting_and_application(
                 job_posting_data, application_data, status_data
             )
@@ -172,8 +171,7 @@ def render_add_job_posting_tab(
 def render_application_status_tab(
     db: Session,
     applications_df: pd.DataFrame,
-    application_controller,
-    job_posting_controller
+    job_tracker_controller
 ) -> None:
     """Render the application status update tab using reusable forms."""
     st.subheader("🔄 Update Application Status")
@@ -195,7 +193,7 @@ def render_application_status_tab(
     
     if selected_app_id:
         # Get application details
-        app_result = application_controller.get_application_details(db, selected_app_id)
+        app_result = job_tracker_controller.get_application_details(db, selected_app_id)
         app_details = app_result.get("details", {}) if app_result["success"] else {}
         
         # 1. Application Status Form on top with confirm button
@@ -214,7 +212,7 @@ def render_application_status_tab(
                 status_data = ApplicationStatusForm.render(f"main_status_{selected_app_id}")
                 
                 if st.form_submit_button("✅ Confirm Status Update", type="primary"):
-                    status_handler = ApplicationStatusFormHandler(db, application_controller)
+                    status_handler = ApplicationStatusFormHandler(db, job_tracker_controller)
                     result = status_handler.update_status(selected_app_id, status_data)
                     status_handler.show_result(result, f"Status updated to '{status_data['status']}'")
                     if result["success"]:
@@ -234,7 +232,7 @@ def render_application_status_tab(
                 )
                 
                 if st.form_submit_button("🔄 Update Job Posting", type="secondary"):
-                    jp_handler = JobPostingFormHandler(db, job_posting_controller)
+                    jp_handler = JobPostingFormHandler(db, job_tracker_controller)
                     result = jp_handler.update_job_posting(app_details['job_posting_id'], job_posting_data)
                     jp_handler.show_result(result, "Job posting details updated!")
                     if result["success"]:
@@ -252,7 +250,7 @@ def render_application_status_tab(
                 )
                 
                 if st.form_submit_button("🔄 Update Application", type="secondary"):
-                    app_handler = ApplicationFormHandler(db, application_controller)
+                    app_handler = ApplicationFormHandler(db, job_tracker_controller)
                     result = app_handler.update_application(
                         selected_app_id, 
                         application_data,
@@ -269,8 +267,7 @@ def render_application_status_tab(
 def render_main_action_tabs(
     db: Session,
     applications_df: pd.DataFrame,
-    job_posting_controller,
-    application_controller,
+    job_tracker_controller,
     langchain_backend
 ) -> None:
     """Render the main action tabs section."""
@@ -281,10 +278,10 @@ def render_main_action_tabs(
     
     with tab1:
         render_application_status_tab(
-            db, applications_df, application_controller, job_posting_controller
+            db, applications_df, job_tracker_controller
         )
     
     with tab2:
         render_add_job_posting_tab(
-            db, job_posting_controller, application_controller, langchain_backend
+            db, job_tracker_controller, langchain_backend
         )
