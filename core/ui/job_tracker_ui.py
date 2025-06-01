@@ -239,6 +239,19 @@ def render_ai_job_description_analyzer(prompt_service) -> None:
     """Render the AI job description analyzer section."""
     st.subheader("🤖 AI Job Description Analyzer")
     
+    # Check if AI service is available
+    if not prompt_service:
+        with st.expander("Job Description Analyzer", expanded=True):
+            st.warning("⚠️ AI service not available. Please configure an LLM model in the sidebar.")
+            st.text_area(
+                "Paste job description here",
+                height=200,
+                key="main_job_description_input",
+                disabled=True
+            )
+            st.button("Analyze Description", key="main_analyze_button", disabled=True)
+        return
+    
     with st.expander("Job Description Analyzer", expanded=True):
         job_description = st.text_area(
             "Paste job description here",

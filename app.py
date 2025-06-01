@@ -7,11 +7,14 @@ from sqlalchemy.orm import Session
 from core.database import Base, engine
 from core.database.base import get_db
 from core.controllers.job_tracker_controller import JobTrackerController
-from core.services.prompt_service import PromptService
-from core.services.llm_service import LLMService, OllamaBackend, LlamaCppBackend
 from core.ui.job_tracker_ui import (
     render_database_display_section,
     render_main_action_tabs
+)
+from core.ui.llm_setup import (
+    render_complete_sidebar,
+    initialize_llm_on_startup,
+    get_current_prompt_service
 )
 
 # Initialize database by creating all tables (idempotent)
@@ -39,22 +42,21 @@ def initialize_controllers():
 @st.cache_resource
 def initialize_ai_backend():
     """Initialize AI backend for job description analysis."""
-    with st.spinner("Initializing AI model..."):
-        available_models = LLMService.get_ollama_models()
-        if available_models:
-            llm_backend = OllamaBackend(available_models[0])
-        else:
-            llm_backend = LlamaCppBackend()
-        
-        if not llm_backend.initialize_model():
-            st.error("Failed to initialize AI model. Please check logs.")
-            st.stop()
-        
-        return PromptService(llm_backend)
+    # This function is now replaced by the LLM setup UI
+    # Return None to let the sidebar handle initialization
+    return None
 
 # Initialize components
 db, job_tracker_controller = initialize_controllers()
-prompt_service = initialize_ai_backend()
+
+# Initialize LLM on startup automatically
+initialize_llm_on_startup()
+
+# Render LLM setup sidebar
+render_complete_sidebar()
+
+# Get current prompt service for the main app
+prompt_service = get_current_prompt_service()
 
 # --- Data Fetching Function ---
 def refresh_applications_display_data(db: Session) -> pd.DataFrame:
