@@ -11,6 +11,7 @@ from core.ui.form_renderers import ReusableFormRenderer
 from core.services.file_service import FileService
 from core.ui.forms import JobPostingForm, ApplicationForm, ApplicationStatusForm
 from core.ui.form_handlers import CombinedFormHandler, ApplicationStatusFormHandler, JobPostingFormHandler, ApplicationFormHandler
+from core.ui.streaming_ui import create_streaming_display
 
 # Render the database display section with tabs for applications and statistics.
 def render_database_display_section(
@@ -237,6 +238,8 @@ def render_application_status_tab(
 # Main action, tab 2 - Render the AI job description analyzer section.
 def render_ai_job_description_analyzer(prompt_service) -> None:
     """Render the AI job description analyzer section."""
+    from .streaming_ui import create_streaming_display
+    
     st.subheader("🤖 AI Job Description Analyzer")
     
     # Check if AI service is available
@@ -259,16 +262,81 @@ def render_ai_job_description_analyzer(prompt_service) -> None:
             key="main_job_description_input"
         )
 
-        if st.button("Analyze Description", key="main_analyze_button"):
-            if not job_description:
-                st.warning("Please paste a job description first.")
+        # Create columns for buttons
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            if not st.session_state.get("ai_analysis_generating", False):
+                analyze_clicked = st.button("🔍 Analyze Description", key="main_analyze_button")
+            else:
+                st.info("🔄 Analyzing job description...")
+                analyze_clicked = False
+        
+        with col2:
+            # Show cancel button only for LlamaCpp backend and when generating
+            if (st.session_state.get("ai_analysis_generating", False) and 
+                hasattr(prompt_service, 'base_backend') and 
+                prompt_service.base_backend.__class__.__name__ == 'LlamaCppBackend'):
+                
+                if st.button("⏹️ Cancel", key="main_cancel_button", type="secondary"):
+                    prompt_service.base_backend.stop_generation()
+                    st.session_state.ai_analysis_generating = False
+                    st.warning("Analysis cancelled by user")
+                    st.rerun()
+
+        # Initialize streaming display
+        streaming_display = create_streaming_display("main_ai_analyzer")
+        response_container = streaming_display.initialize_container()
+        
+        # Handle analysis trigger
+        if analyze_clicked and job_description.strip():
+            st.session_state.ai_analysis_generating = True
+            st.session_state.ai_analysis_job_description = job_description
+            st.rerun()
+        elif analyze_clicked and not job_description.strip():
+            st.warning("Please paste a job description first.")
+        
+        # Handle generation process (only if we're in generating state)
+        if st.session_state.get("ai_analysis_generating", False):
+            # Get the job description from session state
+            analysis_job_description = st.session_state.get("ai_analysis_job_description", "")
+            
+            if not analysis_job_description:
+                st.error("No job description found for analysis")
+                st.session_state.ai_analysis_generating = False
+                st.rerun()
                 return
-
-            with st.spinner("Analyzing job description..."):
-                result = prompt_service.analyze_job_description(job_description)
-
+            
+            try:
+                # Determine if we should use streaming (both LlamaCpp and Ollama now support it)
+                use_streaming = (hasattr(prompt_service, 'base_backend') and 
+                               hasattr(prompt_service.base_backend, 'generate_response_streaming') and
+                               hasattr(prompt_service, 'analyze_job_description_streaming'))
+                
+                if use_streaming:
+                    # Use streaming with UI callback for both backends
+                    update_callback = streaming_display.get_update_callback()
+                    result = prompt_service.analyze_job_description_streaming(
+                        analysis_job_description,
+                        update_callback=update_callback,
+                        max_tokens=2000,
+                        temperature=0.1
+                    )
+                else:
+                    # Use standard generation for backends that don't support streaming
+                    streaming_display.show_processing("Processing job description...")
+                    result = prompt_service.analyze_job_description(analysis_job_description)
+                    
+                    if result:
+                        response_container.success("✅ Analysis completed successfully")
+                    else:
+                        response_container.error("❌ Analysis failed")
+                
+                # Reset generating state
+                st.session_state.ai_analysis_generating = False
+                
+                # Store result for use in form prefilling
                 if result:
-                    # Store analysis result for use in form prefilling
                     st.session_state.analysis_result = {
                         "title": result.title,
                         "company": getattr(result, 'company', ''),
@@ -282,6 +350,9 @@ def render_ai_job_description_analyzer(prompt_service) -> None:
                         "industry": getattr(result, 'industry', ''),
                         "date_posted": getattr(result, 'date_posted', '')
                     }
+                    
+                    # Clear the streaming container and show results
+                    response_container.empty()
                     
                     # Display analysis preview
                     st.divider()
@@ -306,9 +377,16 @@ def render_ai_job_description_analyzer(prompt_service) -> None:
                             if len(skills_list) > 3:
                                 st.write(f"• ... and {len(skills_list) - 3} more")
                     
-                    st.success("✅ Analysis complete! Use the 'Add New Job Posting' tab below to create an entry with this data.")
+                    st.success("✅ Analysis complete! Use the form below to create an entry with this data.")
                 else:
-                    st.error("Failed to analyze job description. Please try again.")
+                    streaming_display.show_error("Analysis failed or was cancelled")
+                
+                st.rerun()
+                    
+            except Exception as e:
+                st.session_state.ai_analysis_generating = False
+                streaming_display.show_error(f"Error during analysis: {str(e)}")
+                st.rerun()
 
 # Main action, tab 2 - Render the add new job posting section with AI analysis and form.
 # Render the add new job posting tab with AI analysis and job posting form.

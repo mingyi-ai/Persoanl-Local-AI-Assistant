@@ -1,4 +1,3 @@
-
 import logging
 from typing import Optional, List
 from langchain.callbacks.manager import CallbackManager
@@ -154,8 +153,16 @@ class PromptService:
         /no_think
         """
 
-    def analyze_job_description(self, description: str) -> Optional[ParsedJobPosting]:
-        """Analyze job description and return structured data."""
+    def analyze_job_description(self, description: str, **kwargs) -> Optional[ParsedJobPosting]:
+        """
+        Analyze job description and return structured data.
+        
+        Args:
+            description: Job description text
+            **kwargs: Additional parameters including:
+                - stream: Enable streaming response (default: False)
+                - response_container: Streamlit container for live updates
+        """
         if not self.langchain_llm:
             logger.error("LangChain LLM not initialized")
             return None
@@ -172,42 +179,117 @@ class PromptService:
         )
         
         try:
-            # Use the new approach recommended by LangChain
-            chain = prompt | self.langchain_llm
-            result = chain.invoke({"description": description})
+            # Check if streaming is requested and backend supports it
+            use_streaming = kwargs.get('stream', False)
             
-            # If result is a string (raw completion), clean and parse it
-            if isinstance(result, str):
-                import re
-                # Only remove the first thinking tag pair
-                result = re.sub(r'<think>.*?</think>', '', result, count=1, flags=re.DOTALL)
-                
-                # Find the outermost JSON object using a more robust pattern
-                # This handles nested objects by counting braces
-                def find_json(text):
-                    stack = []
-                    start = -1
-                    for i, char in enumerate(text):
-                        if char == '{':
-                            if not stack:  # First opening brace
-                                start = i
-                            stack.append(char)
-                        elif char == '}':
-                            if stack and stack[-1] == '{':
-                                stack.pop()
-                                if not stack:  # Found matching outer braces
-                                    return text[start:i+1]
-                    return None
-
-                json_content = find_json(result)
-                if json_content:
-                    result = json_content
-                parsed_result = parser.parse(result.strip())
+            if use_streaming and hasattr(self.base_backend, 'generate_response_streaming'):
+                # Delegate to streaming method if callback is provided
+                update_callback = kwargs.get('update_callback')
+                return self.analyze_job_description_streaming(
+                    description, 
+                    update_callback=update_callback, 
+                    **kwargs
+                )
             else:
-                # If result is already structured, convert it to ParsedJobPosting
-                parsed_result = ParsedJobPosting(**result)
-                
-            return parsed_result
+                # Use the standard LangChain approach
+                chain = prompt | self.langchain_llm
+                result = chain.invoke({"description": description})
+            
+            # Handle None result from streaming (cancelled or failed)
+            if result is None:
+                logger.warning("Analysis result is None (possibly cancelled or failed)")
+                return None
+            
+            # Parse the result using the helper method
+            return self._parse_response(result, parser)
         except Exception as e:
             logger.error(f"Error analyzing job description: {e}")
+            return None
+
+    def analyze_job_description_streaming(self, description: str, update_callback: Optional[callable] = None, **kwargs) -> Optional[ParsedJobPosting]:
+        """
+        Analyze job description with streaming support using callback pattern.
+        
+        Args:
+            description: Job description text
+            update_callback: Function to call with streaming updates (content, is_complete)
+            **kwargs: Additional parameters
+        """
+        if not self.base_backend:
+            logger.error("LLM backend not initialized")
+            return None
+
+        # Check if backend supports streaming
+        if not hasattr(self.base_backend, 'generate_response_streaming'):
+            logger.warning("Backend doesn't support streaming, falling back to regular generation")
+            return self.analyze_job_description(description, **kwargs)
+
+        parser = PydanticOutputParser(pydantic_object=ParsedJobPosting)
+        
+        # Generate dynamic prompt based on form fields
+        template = self._generate_analysis_prompt()
+        
+        prompt = PromptTemplate(
+            template=template,
+            input_variables=["description"],
+            partial_variables={"format_instructions": parser.get_format_instructions()}
+        )
+        
+        formatted_prompt = prompt.format(description=description)
+        messages = [{"role": "user", "content": formatted_prompt}]
+        
+        try:
+            # Generate streaming response with callback
+            result = self.base_backend.generate_response_streaming(
+                messages=messages,
+                update_callback=update_callback,
+                max_tokens=kwargs.get('max_tokens', 2000),
+                temperature=kwargs.get('temperature', 0.1),
+                top_p=kwargs.get('top_p', 0.95)
+            )
+            
+            if not result:
+                logger.warning("No result from streaming generation")
+                return None
+            
+            # Parse the final result
+            return self._parse_response(result, parser)
+            
+        except Exception as e:
+            logger.error(f"Error in streaming analysis: {e}")
+            return None
+
+    def _parse_response(self, result: str, parser) -> Optional[ParsedJobPosting]:
+        """Parse the response text into a ParsedJobPosting object."""
+        try:
+            import re
+            # Only remove the first thinking tag pair
+            cleaned_result = re.sub(r'<think>.*?</think>', '', result, count=1, flags=re.DOTALL)
+            
+            # Find the outermost JSON object using a more robust pattern
+            def find_json(text):
+                stack = []
+                start = -1
+                for i, char in enumerate(text):
+                    if char == '{':
+                        if not stack:  # First opening brace
+                            start = i
+                        stack.append(char)
+                    elif char == '}':
+                        if stack and stack[-1] == '{':
+                            stack.pop()
+                            if not stack:  # Found matching outer braces
+                                return text[start:i+1]
+                return None
+
+            json_content = find_json(cleaned_result)
+            if json_content:
+                parsed_result = parser.parse(json_content.strip())
+                return parsed_result
+            else:
+                logger.warning("No valid JSON content found in response")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error parsing response: {e}")
             return None

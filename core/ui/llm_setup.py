@@ -17,7 +17,7 @@ def _initialize_session_state():
     if "llm_initialized" not in st.session_state:
         st.session_state.llm_initialized = False
     if "selected_backend_type" not in st.session_state:
-        st.session_state.selected_backend_type = "Ollama"
+        st.session_state.selected_backend_type = "LlamaCpp"
     if "selected_model" not in st.session_state:
         st.session_state.selected_model = None
     if "prompt_service" not in st.session_state:
@@ -299,20 +299,7 @@ def initialize_llm_on_startup() -> Optional[PromptService]:
             # Initialize session state first
             _initialize_session_state()
             
-            # Try Ollama first
-            available_ollama_models = LLMService.get_ollama_models()
-            if available_ollama_models:
-                backend = OllamaBackend(available_ollama_models[0])
-                if backend.initialize_model():
-                    st.session_state.llm_backend = backend
-                    st.session_state.llm_initialized = True
-                    st.session_state.selected_backend_type = "Ollama"
-                    st.session_state.selected_model = available_ollama_models[0]
-                    st.session_state.prompt_service = PromptService(backend)
-                    st.session_state.startup_llm_initialized = True
-                    return st.session_state.prompt_service
-            
-            # Fallback to LlamaCpp
+            # Try LlamaCpp first
             if MODELS_DIR.exists():
                 gguf_files = [f for f in MODELS_DIR.iterdir() 
                              if f.is_file() and f.suffix.lower() == '.gguf']
@@ -326,6 +313,19 @@ def initialize_llm_on_startup() -> Optional[PromptService]:
                         st.session_state.prompt_service = PromptService(backend)
                         st.session_state.startup_llm_initialized = True
                         return st.session_state.prompt_service
+            
+            # Fallback to Ollama
+            available_ollama_models = LLMService.get_ollama_models()
+            if available_ollama_models:
+                backend = OllamaBackend(available_ollama_models[0])
+                if backend.initialize_model():
+                    st.session_state.llm_backend = backend
+                    st.session_state.llm_initialized = True
+                    st.session_state.selected_backend_type = "Ollama"
+                    st.session_state.selected_model = available_ollama_models[0]
+                    st.session_state.prompt_service = PromptService(backend)
+                    st.session_state.startup_llm_initialized = True
+                    return st.session_state.prompt_service
         
         except Exception as e:
             # Silently fail and let user manually initialize
