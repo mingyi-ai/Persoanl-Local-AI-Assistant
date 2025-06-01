@@ -33,11 +33,18 @@ class BaseForm:
         
         # Known legacy fields that can be safely ignored
         legacy_fields = {'parsed_metadata', 'id', 'created_at', 'updated_at'}
+        
+        # Fields that are allowed to have null values (optional fields)
+        nullable_fields = {
+            'date_posted', 'source_url', 'tags', 'skills', 'industry', 
+            'additional_questions', 'notes', 'cover_letter_text',
+            'cover_letter', 'source_text'
+        }
             
         for field, value in prefill_data.items():
             if field not in expected_fields and field not in legacy_fields:
                 warnings[field] = f"Unexpected field '{field}' in prefill data"
-            elif value is None:
+            elif value is None and field not in nullable_fields:
                 warnings[field] = f"Field '{field}' has null value in prefill data"
                 
         return warnings

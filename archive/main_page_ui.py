@@ -8,6 +8,8 @@ from core.ui.forms import JobPostingForm, ApplicationForm, ApplicationStatusForm
 from core.ui.displays import display_applications_table, display_status_history
 from core.ui.base import show_validation_errors, show_operation_result
 from core.ui.job_tracker_ui import render_application_management_section
+from core.ui.form_handlers import CombinedFormHandler, ApplicationStatusFormHandler, JobPostingFormHandler, ApplicationFormHandler
+from core.ui.form_renderers import ReusableFormRenderer
 from core.file_utils import save_uploaded_file
 
 
@@ -114,82 +116,9 @@ def render_add_job_posting_tab(
     render_ai_job_description_analyzer(langchain_backend)
     
     st.divider()
-    
-    # Job posting form section
+     # Job posting form section
     st.subheader("📝 Create Job Posting & Application")
     
-    def handle_form_submission(
-        job_posting_data: Dict[str, Any],
-        application_data: Dict[str, Any],
-        status_data: Dict[str, Any]
-    ) -> bool:
-        """Handle the form submission and return whether it was successful."""
-        # Validate job posting data
-        jp_errors = JobPostingForm.validate(job_posting_data)
-        if show_validation_errors(jp_errors):
-            return False
-
-        # Create job posting
-        jp_result = job_posting_controller.create_job_posting(
-            db=db,
-            title=job_posting_data["title"],
-            company=job_posting_data["company"],
-            description=job_posting_data["description"],
-            location=job_posting_data["location"],
-            source_url=job_posting_data["source_url"],
-            date_posted=job_posting_data["date_posted"].isoformat() if job_posting_data["date_posted"] else None,
-            type=job_posting_data["type"],
-            seniority=job_posting_data["seniority"],
-            tags=job_posting_data["tags"],
-            skills=job_posting_data["skills"],
-            industry=job_posting_data["industry"]
-        )
-        
-        if not show_operation_result(jp_result, f"Job Posting '{job_posting_data['title']}' created"):
-            return False
-
-        # Handle file uploads
-        resume_file_path = None
-        cover_letter_file_path = None
-        
-        if application_data["resume"]:
-            resume_file_path = save_uploaded_file(application_data["resume"])
-
-        if application_data["cover_letter_file"]:
-            cover_letter_file_path = save_uploaded_file(application_data["cover_letter_file"])
-
-        # Create application
-        app_result = application_controller.create_application(
-            db=db,
-            job_posting_id=jp_result["job_posting_id"],
-            resume_file_path=resume_file_path,
-            cover_letter_file_path=cover_letter_file_path,
-            cover_letter_text=application_data["cover_letter_text"],
-            submission_method=application_data["submission_method"],
-            additional_questions=application_data["additional_questions"],
-            notes=application_data["notes"],
-            date_submitted=application_data["date_submitted"].isoformat()
-        )
-
-        if not show_operation_result(app_result, "Application created successfully"):
-            return False
-
-        # Log initial status
-        status_result = application_controller.update_application_status(
-            db=db,
-            application_id=app_result["application_id"],
-            status=status_data["status"],
-            source_text=status_data["source_text"]
-        )
-        
-        success = show_operation_result(status_result, "Initial status logged successfully")
-        if success:
-            # Clear the analysis result after successful submission
-            if "analysis_result" in st.session_state:
-                del st.session_state.analysis_result
-        
-        return success
-
     # Get prefill data from AI analysis if available
     prefill_data = st.session_state.get("analysis_result", {})
     
@@ -231,7 +160,12 @@ def render_add_job_posting_tab(
         submitted_form = st.form_submit_button("Create Job Posting and Application", type="primary")
         
         if submitted_form:
-            if handle_form_submission(job_posting_data, application_data, status_data):
+            # Use the centralized form handler
+            combined_handler = CombinedFormHandler(db, job_posting_controller, application_controller)
+            success = combined_handler.create_job_posting_and_application(
+                job_posting_data, application_data, status_data
+            )
+            if success:
                 st.rerun()
 
 
@@ -241,7 +175,7 @@ def render_application_status_tab(
     application_controller,
     job_posting_controller
 ) -> None:
-    """Render the application status update tab."""
+    """Render the application status update tab using reusable forms."""
     st.subheader("🔄 Update Application Status")
     
     if applications_df.empty:
@@ -260,12 +194,12 @@ def render_application_status_tab(
     )
     
     if selected_app_id:
-        # Get application details for status history
+        # Get application details
         app_result = application_controller.get_application_details(db, selected_app_id)
         app_details = app_result.get("details", {}) if app_result["success"] else {}
         
-        # Status History and Logging - moved to top and expanded by default
-        with st.expander("📊 Status History & Logging", expanded=True):
+        # 1. Application Status Form on top with confirm button
+        with st.expander("📊 Status History & Update", expanded=True):
             st.write("**Current Status History:**")
             if app_details.get('status_history'):
                 display_status_history(app_details['status_history'])
@@ -273,46 +207,63 @@ def render_application_status_tab(
                 st.info("No status history available yet.")
             
             st.divider()
-            
-            # Status update form
             st.markdown("**Log New Status Update:**")
-            with st.form(key=f"main_log_status_{selected_app_id}"):
-                col1, col2 = st.columns([1, 3])
+            
+            # Status form with confirm button
+            with st.form(key=f"main_status_form_{selected_app_id}"):
+                status_data = ApplicationStatusForm.render(f"main_status_{selected_app_id}")
                 
-                with col1:
-                    new_status = st.selectbox(
-                        "New Status",
-                        options=['submitted', 'viewed', 'screening', 'interview', 'assessment', 'offer', 'rejected', 'withdrawn'],
-                        key=f"main_new_status_select_{selected_app_id}"
-                    )
-                
-                with col2:
-                    status_notes = st.text_area(
-                        "Status Notes/Details",
-                        placeholder="Add detailed notes about this status update...",
-                        height=100,
-                        key=f"main_status_notes_{selected_app_id}",
-                        label_visibility="collapsed"
-                    )
-                
-                if st.form_submit_button("📝 Log Status Update", type="primary"):
-                    result = application_controller.update_application_status(
-                        db=db,
-                        application_id=selected_app_id,
-                        status=new_status,
-                        source_text=status_notes or f"Status updated to {new_status}"
-                    )
-                    show_operation_result(result, f"Status updated to '{new_status}'")
+                if st.form_submit_button("✅ Confirm Status Update", type="primary"):
+                    status_handler = ApplicationStatusFormHandler(db, application_controller)
+                    result = status_handler.update_status(selected_app_id, status_data)
+                    status_handler.show_result(result, f"Status updated to '{status_data['status']}'")
                     if result["success"]:
                         st.rerun()
         
         st.divider()
         
-        # Full application management section
-        st.markdown("#### 📋 Application Management")
-        render_application_management_section(
-            db, selected_app_id, application_controller, job_posting_controller
-        )
+        # 2. Job Posting Form with update button
+        with st.expander("💼 Job Posting Details", expanded=False):
+            with st.form(key=f"main_job_posting_form_{selected_app_id}"):
+                st.markdown("**Update Job Posting Information:**")
+                job_posting_data = ReusableFormRenderer.render_job_posting_details(
+                    app_details, 
+                    mode="edit", 
+                    key_prefix=f"main_jp_{selected_app_id}",
+                    selected_app_id=selected_app_id
+                )
+                
+                if st.form_submit_button("🔄 Update Job Posting", type="secondary"):
+                    jp_handler = JobPostingFormHandler(db, job_posting_controller)
+                    result = jp_handler.update_job_posting(app_details['job_posting_id'], job_posting_data)
+                    jp_handler.show_result(result, "Job posting details updated!")
+                    if result["success"]:
+                        st.rerun()
+        
+        # 3. Application Form with update button
+        with st.expander("📋 Application Details", expanded=False):
+            with st.form(key=f"main_application_form_{selected_app_id}"):
+                st.markdown("**Update Application Information:**")
+                application_data = ReusableFormRenderer.render_application_details(
+                    app_details, 
+                    mode="edit", 
+                    key_prefix=f"main_app_{selected_app_id}",
+                    selected_app_id=selected_app_id
+                )
+                
+                if st.form_submit_button("🔄 Update Application", type="secondary"):
+                    app_handler = ApplicationFormHandler(db, application_controller)
+                    result = app_handler.update_application(
+                        selected_app_id, 
+                        application_data,
+                        new_resume=application_data.get("new_resume"),
+                        new_cover_letter=application_data.get("new_cover_letter"),
+                        current_resume_path=application_data.get("current_resume_path"),
+                        current_cover_letter_path=application_data.get("current_cover_letter_path")
+                    )
+                    app_handler.show_result(result, "Application details updated!")
+                    if result["success"]:
+                        st.rerun()
 
 
 def render_main_action_tabs(

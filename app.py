@@ -10,7 +10,7 @@ from core.controllers.job_posting_controller import JobPostingController
 from core.controllers.application_controller import ApplicationController
 from core.langchain_tools import LangChainBackend
 from core.LLM_backends import get_ollama_models, OllamaBackend, LlamaCppBackend
-from core.ui.main_page_ui import (
+from core.ui.job_tracker_ui import (
     render_database_display_section,
     render_main_action_tabs
 )
@@ -125,17 +125,4 @@ render_main_action_tabs(
 
 # --- Footer ---
 st.divider()
-st.caption("💡 Tip: Use the sidebar to access additional features and test pages.")
-# when files are placed in the 'pages/' directory.
-
-# Session state initializations that were global in the original app.py
-# should now be handled within their respective pages (1_Job_Tracker.py, 2_AI_Assistant.py)
-# or be truly global if needed by multiple pages and initialized here carefully.
-# For this refactoring, most session states were moved to be page-specific.
-
-# The get_ollama_models() helper function, if needed by multiple pages,
-# could be moved to a utility file in `core/` and imported by each page.
-# For now, a version of it is in 2_AI_Assistant.py.
-
-# Sidebar content that was previously in app.py (like resume upload or model selection)
-# has been moved to the relevant pages (primarily 2_AI_Assistant.py).
+st.caption("💡 Tip: Use the application tabs above to manage your job applications and analyze job descriptions.")
