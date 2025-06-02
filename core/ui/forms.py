@@ -108,7 +108,7 @@ class JobPostingForm(BaseForm):
             value=cls._get_prefill_value(prefill_data, "description"),
             height=200,
             key=f"{key_prefix}_description",
-            help="AI-parsed" if prefill_data and "description" in prefill_data else None
+            help="Original job description from analyzer" if prefill_data and "description" in prefill_data else None
         )
         
         data["source_url"] = st.text_input(

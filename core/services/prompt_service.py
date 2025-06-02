@@ -22,18 +22,27 @@ except ImportError:
     ApplicationForm = None
     ApplicationStatusForm = None
 
-# Create a specialized version of JobPostingBase for AI parsing with field descriptions
-class ParsedJobPosting(JobPostingBase):
-    """Parsed job posting data with field descriptions for AI prompt generation."""
+# Create a specialized schema for AI parsing without description field
+class ParsedJobPostingData(BaseModel):
+    """Parsed job posting data for AI analysis - excludes description field."""
+    title: str
+    company: str
+    location: Optional[str] = None
+    type: Optional[str] = None
+    seniority: Optional[str] = None
+    source_url: Optional[str] = None
+    date_posted: Optional[str] = None
+    tags: Optional[str] = None
+    skills: Optional[str] = None
+    industry: Optional[str] = None
     
     class Config:
-        # Override field descriptions for AI prompt generation (Pydantic V2 compatible)
+        # Field descriptions for AI prompt generation
         json_schema_extra = {
             "properties": {
                 "title": {"description": "The exact job title from the posting"},
                 "company": {"description": "The company name"},
                 "location": {"description": "The job location, including if remote"},
-                "description": {"description": "The full job description text"},
                 "source_url": {"description": "URL where the job posting was found"},
                 "type": {"description": "Job type (Full-time, Part-time, Contract, etc.)"},
                 "seniority": {"description": "Seniority level (Entry, Mid-Senior, Director, etc.)"},
@@ -79,12 +88,11 @@ class PromptService:
         
         job_fields = JobPostingForm.EXPECTED_FIELDS
         
-        # Map form fields to descriptions
+        # Map form fields to descriptions (excluding description field to avoid duplication)
         field_descriptions = {
             "title": "Extract the exact job title as written",
             "company": "Extract company name if present",
             "location": "Include full location details, note if remote/hybrid/on-site",
-            "description": "Use the full original job description text",
             "source_url": "Extract any URLs mentioned in the posting",
             "type": "Job type: Full-time, Part-time, Contract, Temporary, Internship, Freelance, Other",
             "seniority": "Seniority level: Entry, Mid-Senior, Director, Executive, Intern, Other",
@@ -94,12 +102,12 @@ class PromptService:
             "date_posted": "Extract posting date if mentioned (use YYYY-MM-DD format)"
         }
         
-        # Generate field instructions
+        # Generate field instructions (excluding description field)
         field_instructions = []
-        required_fields = ["title", "company", "description"]  # Based on JobPostingForm.validate()
+        required_fields = ["title", "company"]  # Removed description from required fields since it won't be in the AI response
         
         for field in job_fields:
-            if field in field_descriptions:
+            if field in field_descriptions:  # Only include fields we want the AI to extract
                 required_marker = " (REQUIRED)" if field in required_fields else " (Optional)"
                 field_instructions.append(f"  - {field}{required_marker}: {field_descriptions[field]}")
         
@@ -118,6 +126,7 @@ class PromptService:
         7. For type/seniority: choose the closest match from the available options
         8. Keep extracted text concise but complete
         9. The response must be valid JSON with all fields included
+        10. DO NOT include the original job description text in the response - only extract structured data
 
         Job Description:
         {{description}}
@@ -136,7 +145,6 @@ class PromptService:
         - title: The exact job title
         - company: Company name
         - location: Job location
-        - description: Full job description
         - source_url: Any URLs mentioned
         - type: Employment type (Full-time, Part-time, Contract, etc.)
         - seniority: Seniority level (Entry, Mid-Senior, Director, etc.)
@@ -144,6 +152,8 @@ class PromptService:
         - skills: Technical skills (comma-separated)
         - industry: Industry sector
         - date_posted: Posting date (YYYY-MM-DD)
+
+        IMPORTANT: Do not include the original job description text in the response.
 
         Job Description:
         {description}
@@ -153,7 +163,7 @@ class PromptService:
         /no_think
         """
 
-    def analyze_job_description(self, description: str, **kwargs) -> Optional[ParsedJobPosting]:
+    def analyze_job_description(self, description: str, **kwargs) -> Optional[ParsedJobPostingData]:
         """
         Analyze job description and return structured data.
         
@@ -167,7 +177,7 @@ class PromptService:
             logger.error("LangChain LLM not initialized")
             return None
 
-        parser = PydanticOutputParser(pydantic_object=ParsedJobPosting)
+        parser = PydanticOutputParser(pydantic_object=ParsedJobPostingData)
         
         # Generate dynamic prompt based on form fields
         template = self._generate_analysis_prompt()
@@ -206,7 +216,7 @@ class PromptService:
             logger.error(f"Error analyzing job description: {e}")
             return None
 
-    def analyze_job_description_streaming(self, description: str, update_callback: Optional[callable] = None, **kwargs) -> Optional[ParsedJobPosting]:
+    def analyze_job_description_streaming(self, description: str, update_callback: Optional[callable] = None, **kwargs) -> Optional[ParsedJobPostingData]:
         """
         Analyze job description with streaming support using callback pattern.
         
@@ -224,7 +234,7 @@ class PromptService:
             logger.warning("Backend doesn't support streaming, falling back to regular generation")
             return self.analyze_job_description(description, **kwargs)
 
-        parser = PydanticOutputParser(pydantic_object=ParsedJobPosting)
+        parser = PydanticOutputParser(pydantic_object=ParsedJobPostingData)
         
         # Generate dynamic prompt based on form fields
         template = self._generate_analysis_prompt()
@@ -259,7 +269,7 @@ class PromptService:
             logger.error(f"Error in streaming analysis: {e}")
             return None
 
-    def _parse_response(self, result: str, parser) -> Optional[ParsedJobPosting]:
+    def _parse_response(self, result: str, parser) -> Optional[ParsedJobPostingData]:
         """Parse the response text into a ParsedJobPosting object."""
         try:
             import re
