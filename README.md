@@ -1,5 +1,11 @@
 # 🎯 JobAssistant - AI-Powered Job Application Tracker
 
+![Development Status](https://img.shields.io/badge/Status-Under%20Development-orange?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+
+> ⚠️ **Development Notice**: This project is actively under development. Features may change and some functionality is still being refined.
+
 A Streamlit-based application that combines job application management with AI-powered job description analysis. JobAssistant helps you organize your job search while leveraging local AI models for intelligent parsing and insights.
 
 ## 🌟 Features
@@ -21,25 +27,15 @@ A Streamlit-based application that combines job application management with AI-p
 ### Data Management
 - **SQLite Database** - Reliable local data storage with SQLAlchemy ORM
 - **Database Archiving** - Backup and reset functionality
-- **Import/Export** - Manage your data with standard formats
 
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- **Python 3.8+** with pip
-- **Git** for cloning the repository
-- **8GB+ RAM** recommended for local AI models
-- So far only tested on Apple Silicon Macs.
+- **So far only tested on Apple Silicon Macs.**
 
 ### Installation
 
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd JobAssistant
-   ```
+1. **Clone the repository:** download the code to your local machine.
 
 2. **Install Python dependencies:**
    ```bash
@@ -56,16 +52,14 @@ A Streamlit-based application that combines job application management with AI-p
 
 
    **Option B: Ollama**
-   ```bash
-   # Install Ollama (https://ollama.ai)
-   curl -fsSL https://ollama.ai/install.sh | sh
-   
-   # Download a compatible model (e.g., Qwen3)
-   ollama pull qwen3:8b
-   
-   # Start Ollama service
-   ollama serve
-   ```
+   - Install [Ollama](https://ollama.com/docs/installation) and set up the Ollama service.
+   -    ```bash
+         # Download a compatible model (e.g., Qwen3)
+         ollama pull qwen3:8b
+         
+         # Start Ollama service
+         ollama serve
+         ```
    - Requires Ollama service running and less control over models.
 
 4. **Launch the application:**
@@ -105,16 +99,19 @@ A Streamlit-based application that combines job application management with AI-p
 - ✅ Search and filtering
 - ✅ Database backup and reset
 
+**Knowon Issues:**
+- ❗ Whenever start the app, if you directly switch to the second tab and click on a button, it will jump back to the first tab. Later clicks will work as expected. Will look into this session state issue later.
+
 **In Progress:**
 - 🔄 Enhanced AI prompt engineering
-- 🔄 More AI features such as tailor CV and cover letter 
+- 🔄 More AI features such as tailor CV and cover letter
 - 🔄 Advanced analytics dashboard
-- 🔄 UI improvements 
+- 🔄 UI improvements
 
 **Planned Features:**
 - Integration with job boards (LinkedIn, Indeed)
 - Cover letter and resume generation, preferably fine-tune a small model for this
-- Other AI capabilities like interview preparation, salary negotiation, etc. 
+- Other AI capabilities like interview preparation, salary negotiation, etc.
 
 
 ## 📄 License

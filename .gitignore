@@ -6,9 +6,6 @@ __pycache__/
 # Database files
 data/
 
-# Test files
-tests/
-
 # model files
 core/models/
 
