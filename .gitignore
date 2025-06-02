@@ -4,10 +4,12 @@ __pycache__/
 *$py.class
 
 # Database files
-data/
+data/*
+!data/.gitkeep
 
 # model files
-core/models/
+core/models/*
+!core/models/.gitkeep
 
 # Virtual environments
 venv/
