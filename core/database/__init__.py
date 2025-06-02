@@ -5,8 +5,7 @@ from .models import (
     ApplicationStatus,
 )
 
-# Create all tables
-Base.metadata.create_all(bind=engine)
+# Note: Database tables are now created in app.py after data directory setup
 
 __all__ = [
     'Base',

@@ -32,6 +32,11 @@ def render_database_display_section(
             # Create search bar with clear button
             search_col, clear_col = st.columns([4, 1])
             
+            # Check if clear button was clicked in previous run
+            if "clear_search_clicked" in st.session_state and st.session_state.clear_search_clicked:
+                st.session_state.app_search = ""
+                st.session_state.clear_search_clicked = False
+            
             with search_col:
                 search_term = st.text_input(
                     "Search applications",
@@ -43,7 +48,7 @@ def render_database_display_section(
             
             with clear_col:
                 if st.button("🗑️ Clear", key="clear_search", help="Clear search", use_container_width=True):
-                    st.session_state.app_search = ""
+                    st.session_state.clear_search_clicked = True
                     st.rerun()
             
             # Perform search

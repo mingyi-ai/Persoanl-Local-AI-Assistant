@@ -29,7 +29,7 @@ def create_job_posting(db: Session, job_posting: schemas.JobPostingCreate) -> mo
     db.refresh(db_job_posting)
     return db_job_posting
 
-def update_job_posting(db: Session, job_posting_id: int, job_posting: schemas.JobPostingCreate) -> Optional[models.JobPosting]:
+def update_job_posting(db: Session, job_posting_id: int, job_posting: schemas.JobPostingUpdate) -> Optional[models.JobPosting]:
     """Update a job posting."""
     db_job_posting = get_job_posting(db, job_posting_id)
     if db_job_posting:
@@ -70,7 +70,7 @@ def get_applications_by_job_posting(db: Session, job_posting_id: int) -> List[mo
     """Get all applications for a specific job posting."""
     return db.query(models.Application).filter(models.Application.job_posting_id == job_posting_id).all()
 
-def update_application(db: Session, application_id: int, application: schemas.ApplicationCreate) -> Optional[models.Application]:
+def update_application(db: Session, application_id: int, application: schemas.ApplicationUpdate) -> Optional[models.Application]:
     """Update an application."""
     db_application = get_application(db, application_id)
     if db_application:
@@ -131,7 +131,7 @@ def search_job_postings(db: Session, search_term: str = "", company: str = "", s
     
     return query.offset(skip).limit(limit).all()
 
-def get_applications_with_status(db: Session, status: str = None, skip: int = 0, limit: int = 100) -> List[models.Application]:
+def get_applications_with_status(db: Session, status: Optional[str] = None, skip: int = 0, limit: int = 100) -> List[models.Application]:
     """Get applications filtered by their latest status."""
     if status:
         # Get applications with latest status matching the filter

@@ -82,22 +82,24 @@ class JobTrackerService:
         industry: Optional[str] = None,
     ) -> Optional[models.JobPosting]:
         """Update a job posting with the given details."""
+        # Convert to update schema for validation and type safety
+        job_posting_update = schemas.JobPostingUpdate(
+            title=title,
+            company=company,
+            description=description,
+            location=location,
+            type=job_type,
+            seniority=seniority,
+            source_url=source_url,
+            date_posted=date_posted,
+            tags=tags,
+            skills=skills,
+            industry=industry
+        )
         job_posting = crud.update_job_posting(
             db,
             job_posting_id,
-            schemas.JobPostingCreate(
-                title=title,
-                company=company,
-                description=description,
-                location=location,
-                type=job_type,
-                seniority=seniority,
-                source_url=source_url,
-                date_posted=date_posted,
-                tags=tags,
-                skills=skills,
-                industry=industry
-            )
+            job_posting_update
         )
         return job_posting
 
@@ -293,7 +295,9 @@ class JobTrackerService:
         **updates
     ) -> Optional[models.Application]:
         """Update an application with new details."""
-        return crud.update_application(db, application_id, updates)
+        # Convert dictionary to Pydantic schema for validation and type safety
+        application_update = schemas.ApplicationUpdate(**updates)
+        return crud.update_application(db, application_id, application_update)
 
     @staticmethod
     def delete_application(db: Session, application_id: int) -> bool:

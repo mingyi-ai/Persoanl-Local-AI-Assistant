@@ -56,6 +56,20 @@ class JobPostingBase(BaseModel):
 class JobPostingCreate(JobPostingBase):
     pass
 
+class JobPostingUpdate(BaseModel):
+    """Schema for updating job postings - all fields optional"""
+    title: Optional[str] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    type: Optional[str] = None
+    seniority: Optional[str] = None
+    description: Optional[str] = None
+    source_url: Optional[str] = None
+    date_posted: Optional[str] = None
+    tags: Optional[str] = None
+    skills: Optional[str] = None
+    industry: Optional[str] = None
+
 class JobPosting(JobPostingBase):
     id: int
     created_at: datetime
@@ -78,6 +92,17 @@ class ApplicationBase(BaseModel):
 
 class ApplicationCreate(ApplicationBase):
     pass
+
+class ApplicationUpdate(BaseModel):
+    """Schema for updating applications - all fields optional"""
+    job_posting_id: Optional[int] = None
+    submission_method: Optional[str] = None
+    date_submitted: Optional[str] = None
+    resume_file_path: Optional[str] = None
+    cover_letter_file_path: Optional[str] = None
+    cover_letter_text: Optional[str] = None
+    additional_questions: Optional[str] = None
+    notes: Optional[str] = None
 
 class Application(ApplicationBase):
     id: int

@@ -12,6 +12,7 @@ import logging # Added import for logging
 from core.database import Base, engine
 from core.database.base import get_db
 from core.controllers.job_tracker_controller import JobTrackerController
+from core.services.file_service import FileService
 from core.ui.job_tracker_ui import (
     render_database_display_section,
     render_main_action_tabs
@@ -25,6 +26,15 @@ from core.ui.llm_setup import (
 # Initialize logger
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Ensure Data Directory Exists ---
+# This must be done before database initialization to prevent file path errors
+success, message = FileService.ensure_data_directory_exists()
+if not success:
+    st.error(f"Failed to initialize data directory: {message}")
+    st.stop()
+else:
+    logger.info(message)
 
 # Initialize database by creating all tables (idempotent)
 Base.metadata.create_all(bind=engine)
