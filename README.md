@@ -2,6 +2,7 @@
 
 ![Development Status](https://img.shields.io/badge/Status-Under%20Development-orange?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square)
+![Package Manager](https://img.shields.io/badge/Package%20Manager-uv-purple?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
 > ⚠️ **Development Notice**: This project is actively under development. Features may change and some functionality is still being refined.
@@ -37,9 +38,13 @@ A Streamlit-based application that combines job application management with AI-p
 
 1. **Clone the repository:** download the code to your local machine.
 
-2. **Install Python dependencies:**
+2. **Install Python dependencies:** install uv first, then 
    ```bash
-   pip install -r requirements.txt
+   # Initialize and install dependencies
+   uv sync
+   
+   # Activate the virtual environment
+   source .venv/bin/activate
    ```
 
 3. **Set up AI Backend** (choose one option):
@@ -64,7 +69,7 @@ A Streamlit-based application that combines job application management with AI-p
 
 4. **Launch the application:**
    ```bash
-   streamlit run app.py
+   uv run streamlit run app.py
    ```
 
 ## 🛠️ Development

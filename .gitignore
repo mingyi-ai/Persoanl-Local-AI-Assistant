@@ -15,6 +15,7 @@ core/models/*
 venv/
 env/
 ENV/
+.venv/ # uv's virtual environment
 
 # IDE files
 .idea/
@@ -25,16 +26,3 @@ ENV/
 # OS specific files
 .DS_Store
 Thumbs.db
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pytest
-.pytest_cache/
-.coverage
-htmlcov/

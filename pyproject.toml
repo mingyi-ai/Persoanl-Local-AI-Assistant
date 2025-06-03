@@ -1,0 +1,16 @@
+[project]
+name = "persoanl-local-ai-assistant"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=0.3.25",
+    "langchain-community>=0.3.24",
+    "langchain-ollama>=0.3.3",
+    "llama-cpp-python>=0.3.9",
+    "pandas>=2.2.3",
+    "pydantic>=2.11.5",
+    "requests>=2.32.3",
+    "sqlalchemy>=2.0.41",
+    "streamlit>=1.45.1",
+]
