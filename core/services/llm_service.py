@@ -67,8 +67,11 @@ class LlamaCppBackend(LLMBackend):
                 st.session_state.llm_model = Llama(
                     model_path=self.model_path,
                     n_gpu_layers=-1,  # Use all GPU layers
-                    n_ctx=2048,      # Context size
-                    verbose=True     # Enable verbose logging
+                    n_ctx=4096,      # Context size
+                    verbose=True,    # Enable verbose logging
+                    logits_all=False, # Don't log all logits (performance)
+                    echo=False,      # Don't echo input in output
+                    last_n_tokens_size=64  # Size of last_n_tokens buffer
                 )
             logger.info("Model loaded successfully")
             return True
@@ -85,9 +88,11 @@ class LlamaCppBackend(LLMBackend):
             logger.info("Generating response...")
             response = st.session_state.llm_model.create_chat_completion(
                 messages=messages,
-                max_tokens=kwargs.get('max_tokens', 100),
+                max_tokens=kwargs.get('max_tokens', 2000),
                 temperature=kwargs.get('temperature', 0.7),
-                top_p=kwargs.get('top_p', 0.95)
+                top_p=kwargs.get('top_p', 0.8),
+                top_k=kwargs.get('top_k', 20),
+                presence_penalty=kwargs.get('presence_penalty', 1.5),
             )
             
             if response and 'choices' in response and response['choices']:
@@ -117,8 +122,10 @@ class LlamaCppBackend(LLMBackend):
             stream = st.session_state.llm_model.create_chat_completion(
                 messages=messages,
                 max_tokens=kwargs.get('max_tokens', 2000),
-                temperature=kwargs.get('temperature', 0.1),
+                temperature=kwargs.get('temperature', 0.6),
                 top_p=kwargs.get('top_p', 0.95),
+                top_k=kwargs.get('top_k', 20),
+                presence_penalty=kwargs.get('presence_penalty', 1.5),
                 stream=True
             )
             
